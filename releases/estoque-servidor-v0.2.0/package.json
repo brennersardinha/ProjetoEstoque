@@ -1,0 +1,36 @@
+{
+  "name": "estoque-inventario",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Sistema de inventario local para catalogo, balancos e contagens auditaveis.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace apps/api run dev",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "start:server": "powershell -ExecutionPolicy Bypass -File scripts/iniciar-estoque.ps1",
+    "stop:server": "powershell -ExecutionPolicy Bypass -File scripts/parar-estoque.ps1",
+    "build:desktop": "npm --workspace apps/web run build && npm --workspace apps/desktop run build",
+    "backup:db": "powershell -ExecutionPolicy Bypass -File scripts/backup-database.ps1",
+    "restore:db": "powershell -ExecutionPolicy Bypass -File scripts/restore-database.ps1"
+  },
+  "devDependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-native": "0.76.9",
+    "metro": "0.81.5",
+    "metro-config": "0.81.5",
+    "metro-resolver": "0.81.5"
+  }
+}

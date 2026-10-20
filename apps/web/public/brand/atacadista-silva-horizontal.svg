@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="360" viewBox="0 0 1320 360" role="img" aria-labelledby="title desc">
+  <title id="title">Atacadista Silva</title>
+  <desc id="desc">Monograma AS e nome Atacadista Silva em composição horizontal, fundo transparente.</desc>
+  <g transform="translate(74 48) scale(1.18)">
+    <path fill="#090909" d="M36 0h148v12q0 13 13 13h13v154h-13q-13 0-13 13v12H36v-12q0-13-13-13H10V25h13q13 0 13-13z"/>
+    <path fill="none" stroke="#fff" stroke-width="4" d="M42 9h136v8q0 15 15 15h8v142h-8q-15 0-15 15v8H42v-8q0-15-15-15h-8V32h8q15 0 15-15z"/>
+    <path fill="none" stroke="#fff" stroke-width="2" d="M49 19h122v3q0 17 17 17h3v128h-3q-17 0-17 17v3H49v-3q0-17-17-17V39q17 0 17-17z"/>
+    <text x="110" y="139" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="94" font-weight="900" letter-spacing="-13" text-anchor="middle">AS</text>
+  </g>
+  <text x="390" y="205" fill="#090909" font-family="Arial, Helvetica, sans-serif" font-size="69" font-weight="800" letter-spacing="1.4">ATACADISTA SILVA</text>
+</svg>

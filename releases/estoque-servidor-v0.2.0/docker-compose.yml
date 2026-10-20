@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-estoque}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-estoque}
+      POSTGRES_DB: ${POSTGRES_DB:-estoque}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - estoque-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U estoque -d estoque"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://estoque:estoque@postgres:5432/estoque
+      JWT_SECRET: ${JWT_SECRET:?configure JWT_SECRET in .env}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173,http://127.0.0.1:5173}
+    ports:
+      - "3000:3000"
+    volumes:
+      - estoque-product-photos:/app/apps/api/uploads/products
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  estoque-postgres:
+  estoque-product-photos:

@@ -1,0 +1,205 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  VENDEDOR
+}
+
+enum BalanceStatus {
+  RASCUNHO
+  ABERTO
+  EM_REVISAO
+  ENCERRADO
+  CANCELADO
+}
+
+enum BalanceKind {
+  CATEGORIA
+  PERSONALIZADO
+}
+
+enum ItemStatus {
+  PENDENTE
+  CONTADO
+  EM_REVISAO
+  APROVADO
+}
+
+enum IdentifierType {
+  BARCODE
+  QR
+}
+
+model User {
+  id            String        @id @default(uuid()) @db.Uuid
+  name          String
+  login         String        @unique
+  passwordHash  String        @map("password_hash")
+  role          Role
+  active        Boolean       @default(true)
+  sessionVersion Int          @default(0) @map("session_version")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  counts        Count[]
+  balances      Balance[]     @relation("BalanceCreator")
+  audits        Audit[]
+  approvedItems BalanceItem[] @relation("ItemApprover")
+  imports       ImportBatch[]
+  assignedBalances BalanceAssignment[]
+
+  @@map("users")
+}
+
+model Category {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String    @unique
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  products  Product[]
+  balances  Balance[]
+
+  @@map("categories")
+}
+
+model Product {
+  id           String        @id @default(uuid()) @db.Uuid
+  internalCode String        @unique @map("internal_code")
+  name         String
+  unit         String
+  photoUrl     String?       @map("photo_url")
+  active       Boolean       @default(true)
+  categoryId   String        @map("category_id") @db.Uuid
+  category     Category      @relation(fields: [categoryId], references: [id])
+  identifiers  Identifier[]
+  balanceItems BalanceItem[]
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  @@index([name])
+  @@map("products")
+}
+
+model Identifier {
+  id              String         @id @default(uuid()) @db.Uuid
+  productId       String         @map("product_id") @db.Uuid
+  product         Product        @relation(fields: [productId], references: [id])
+  type            IdentifierType
+  normalizedValue String         @map("normalized_value")
+  active          Boolean        @default(true)
+  createdAt       DateTime       @default(now()) @map("created_at")
+  revokedAt       DateTime?      @map("revoked_at")
+
+  @@index([normalizedValue])
+  @@map("identifiers")
+}
+
+model Balance {
+  id                 String        @id @default(uuid()) @db.Uuid
+  name               String
+  kind               BalanceKind    @default(PERSONALIZADO)
+  categoryId         String?        @map("category_id") @db.Uuid
+  category           Category?      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  status             BalanceStatus @default(RASCUNHO)
+  createdById        String        @map("created_by_id") @db.Uuid
+  createdBy          User          @relation("BalanceCreator", fields: [createdById], references: [id])
+  items              BalanceItem[]
+  assignments        BalanceAssignment[]
+  createdAt          DateTime      @default(now()) @map("created_at")
+  openedAt           DateTime?     @map("opened_at")
+  closedAt           DateTime?     @map("closed_at")
+  cancelledAt        DateTime?     @map("cancelled_at")
+  cancellationReason String?       @map("cancellation_reason")
+
+  @@index([categoryId])
+  @@map("balances")
+}
+
+model BalanceAssignment {
+  balanceId  String   @map("balance_id") @db.Uuid
+  balance    Balance  @relation(fields: [balanceId], references: [id], onDelete: Cascade)
+  userId     String   @map("user_id") @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  assignedAt DateTime @default(now()) @map("assigned_at")
+
+  @@id([balanceId, userId])
+  @@index([userId])
+  @@map("balance_assignments")
+}
+
+model BalanceItem {
+  id                String     @id @default(uuid()) @db.Uuid
+  balanceId         String     @map("balance_id") @db.Uuid
+  balance           Balance    @relation(fields: [balanceId], references: [id])
+  productId         String     @map("product_id") @db.Uuid
+  product           Product    @relation(fields: [productId], references: [id])
+  referenceQuantity Decimal    @map("reference_quantity") @db.Decimal(14, 3)
+  finalQuantity     Decimal?   @map("final_quantity") @db.Decimal(14, 3)
+  status            ItemStatus @default(PENDENTE)
+  approvedCountId   String?    @unique @map("approved_count_id") @db.Uuid
+  approvedById      String?    @map("approved_by_id") @db.Uuid
+  approvedBy        User?      @relation("ItemApprover", fields: [approvedById], references: [id])
+  approvedAt        DateTime?  @map("approved_at")
+  counts            Count[]
+
+  @@unique([balanceId, productId])
+  @@map("balance_items")
+}
+
+model Count {
+  id             String      @id @default(uuid()) @db.Uuid
+  balanceItemId  String      @map("balance_item_id") @db.Uuid
+  balanceItem    BalanceItem @relation(fields: [balanceItemId], references: [id])
+  userId         String      @map("user_id") @db.Uuid
+  user           User        @relation(fields: [userId], references: [id])
+  quantity       Decimal     @db.Decimal(14, 3)
+  countedAt      DateTime    @default(now()) @map("counted_at")
+  observation    String?
+  idempotencyKey String      @unique @map("idempotency_key")
+  isRecount      Boolean     @default(false) @map("is_recount")
+
+  @@map("counts")
+}
+
+model Audit {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  objectType String   @map("object_type")
+  objectId   String   @map("object_id")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([objectType, objectId])
+  @@map("audits")
+}
+
+enum ImportBatchStatus {
+  PREVIEW
+  CONFIRMED
+  EXPIRED
+}
+
+model ImportBatch {
+  id          String            @id @default(uuid()) @db.Uuid
+  createdById String            @map("created_by_id") @db.Uuid
+  createdBy   User              @relation(fields: [createdById], references: [id])
+  fileHash    String            @map("file_hash")
+  mapping     Json
+  rows        Json
+  status      ImportBatchStatus @default(PREVIEW)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  expiresAt   DateTime          @map("expires_at")
+  confirmedAt DateTime?         @map("confirmed_at")
+
+  @@index([status, expiresAt])
+  @@map("import_batches")
+}

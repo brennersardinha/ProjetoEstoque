@@ -1,0 +1,43 @@
+{
+  "name": "@estoque/desktop",
+  "version": "0.3.2",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "build": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "34.3.3",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "com.projetoestoque.desktop",
+    "productName": "Estoque",
+    "directories": {
+      "output": "../../release"
+    },
+    "files": [
+      "main.js"
+    ],
+    "extraResources": [
+      { "from": "../../apps/web/dist", "to": "web" },
+      { "from": "../../docker-compose.yml", "to": "server/docker-compose.yml" },
+      { "from": "../../package.json", "to": "server/package.json" },
+      { "from": "../../package-lock.json", "to": "server/package-lock.json" },
+      { "from": "../../tsconfig.base.json", "to": "server/tsconfig.base.json" },
+      { "from": "../../apps/api", "to": "server/apps/api" },
+      { "from": "../../packages/shared", "to": "server/packages/shared" }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Estoque"
+    }
+  }
+}

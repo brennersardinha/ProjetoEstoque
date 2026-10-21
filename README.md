@@ -56,4 +56,4 @@ O banco não deve ser exposto à internet. Antes do piloto, ainda é necessário
 
 ## Aplicativo desktop instalável
 
-Para gerar o instalador Windows do painel e servidor, execute `npm run build:desktop`. O arquivo será criado em `release/Estoque Setup 0.3.2.exe`. O instalador cria atalhos no Menu Iniciar e na Área de Trabalho e abre o painel em uma janela própria do aplicativo. O Docker Desktop continua sendo necessário para executar o banco e a API localmente.
+Para gerar o instalador Windows do painel e servidor, execute `npm run build:desktop`. O arquivo será criado em `release/Estoque Setup 0.3.4.exe`. O instalador cria atalhos no Menu Iniciar e na Área de Trabalho e abre o painel em uma janela própria do aplicativo. O Docker Desktop continua sendo necessário para executar o banco e a API localmente.

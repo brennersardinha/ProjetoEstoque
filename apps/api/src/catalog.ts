@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 import multer from "multer";
 import QRCode from "qrcode";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 import { prisma } from "./database.js";
 import { createQrToken, identifierValueSchema, normalizeIdentifier, resolveIdentifier } from "./identifiers.js";
 import { requireAdmin, requireAuthentication } from "./http-auth.js";
+import { ipRateLimit } from "./rate-limit.js";
 
 const unitSchema = z.enum(["UN", "CX", "MT", "ROLO"]);
 const idSchema = z.string().uuid();
@@ -82,7 +84,7 @@ export function registerCatalogRoutes(router: Router) {
         select: {
           id: true, internalCode: true, name: true, unit: true, photoUrl: true,
           category: { select: { id: true, name: true } },
-          identifiers: { where: { type: "QR", active: true }, select: { normalizedValue: true }, take: 1 }
+          identifiers: { where: { active: true }, select: { type: true, normalizedValue: true } }
         }
       });
       response.json({ data: products });
@@ -116,6 +118,143 @@ export function registerCatalogRoutes(router: Router) {
       response.status(201).json(product);
     } catch (error) {
       handleDatabaseError(error, response, next);
+    }
+  });
+
+  router.patch("/products/:id", ipRateLimit(15 * 60 * 1000, 10), requireAuthentication, requireAdmin, async (request, response, next) => {
+    try {
+      const productId = idSchema.parse(request.params.id);
+      const input = z.object({
+        currentPassword: z.string().min(1).max(200),
+        internalCode: z.string().trim().min(1).max(120),
+        name: z.string().trim().min(1).max(200),
+        unit: unitSchema,
+        categoryId: idSchema,
+        barcode: z.string().trim().max(255).default("")
+      }).parse(request.body);
+      const actor = response.locals.user;
+      const admin = await prisma.user.findFirst({
+        where: { id: actor.id, role: "ADMIN", active: true },
+        select: { passwordHash: true }
+      });
+      if (!admin || !(await bcrypt.compare(input.currentPassword, admin.passwordHash))) {
+        response.status(400).json({ error: { code: "INVALID_CREDENTIALS", message: "A senha do administrador está incorreta.", details: [] } });
+        return;
+      }
+
+      const updated = await prisma.$transaction(async (transaction) => {
+        const existing = await transaction.product.findFirst({
+          where: { id: productId, active: true },
+          select: { id: true, internalCode: true, name: true, unit: true, categoryId: true }
+        });
+        if (!existing) throw new Error("PRODUCT_NOT_FOUND");
+        const category = await transaction.category.findFirst({ where: { id: input.categoryId, active: true }, select: { id: true } });
+        if (!category) throw new Error("CATEGORY_NOT_FOUND");
+
+        const activeBarcodes = await transaction.identifier.findMany({
+          where: { productId, type: "BARCODE", active: true },
+          select: { normalizedValue: true }
+        });
+        const barcodeChanged = (activeBarcodes[0]?.normalizedValue ?? "") !== input.barcode;
+        await transaction.product.update({
+          where: { id: productId },
+          data: { internalCode: input.internalCode, name: input.name, unit: input.unit, categoryId: input.categoryId },
+        });
+        if (barcodeChanged) {
+          await transaction.identifier.updateMany({
+            where: { productId, type: "BARCODE", active: true },
+            data: { active: false, revokedAt: new Date() }
+          });
+          if (input.barcode) {
+            await transaction.identifier.create({ data: { productId, type: "BARCODE", normalizedValue: normalizeIdentifier(input.barcode) } });
+          }
+        }
+        await transaction.audit.create({
+          data: {
+            userId: actor.id,
+            action: "PRODUCT_UPDATED",
+            objectType: "PRODUCT",
+            objectId: productId,
+            metadata: {
+              before: { internalCode: existing.internalCode, name: existing.name, unit: existing.unit, categoryId: existing.categoryId },
+              after: { internalCode: input.internalCode, name: input.name, unit: input.unit, categoryId: input.categoryId, barcodeChanged }
+            }
+          }
+        });
+        return transaction.product.findUniqueOrThrow({
+          where: { id: productId },
+          select: {
+            id: true, internalCode: true, name: true, unit: true, photoUrl: true,
+            category: { select: { id: true, name: true } },
+            identifiers: { where: { active: true }, select: { type: true, normalizedValue: true } }
+          }
+        });
+      });
+      response.json(updated);
+    } catch (error) {
+      if (error instanceof Error && error.message === "PRODUCT_NOT_FOUND") {
+        response.status(404).json({ error: { code: error.message, message: "Produto não encontrado.", details: [] } });
+        return;
+      }
+      if (error instanceof Error && error.message === "CATEGORY_NOT_FOUND") {
+        response.status(422).json({ error: { code: error.message, message: "Selecione uma categoria ativa.", details: [] } });
+        return;
+      }
+      handleDatabaseError(error, response, next);
+    }
+  });
+
+  router.delete("/products/:id", ipRateLimit(15 * 60 * 1000, 10), requireAuthentication, requireAdmin, async (request, response, next) => {
+    try {
+      const productId = idSchema.parse(request.params.id);
+      const { currentPassword } = z.object({ currentPassword: z.string().min(1).max(200) }).parse(request.body);
+      const actor = response.locals.user;
+      const admin = await prisma.user.findFirst({
+        where: { id: actor.id, role: "ADMIN", active: true },
+        select: { passwordHash: true }
+      });
+      if (!admin || !(await bcrypt.compare(currentPassword, admin.passwordHash))) {
+        response.status(400).json({ error: { code: "INVALID_CREDENTIALS", message: "A senha do administrador está incorreta.", details: [] } });
+        return;
+      }
+
+      await prisma.$transaction(async (transaction) => {
+        const product = await transaction.product.findFirst({
+          where: { id: productId, active: true },
+          select: { id: true, internalCode: true, name: true }
+        });
+        if (!product) throw new Error("PRODUCT_NOT_FOUND");
+        const pendingBalanceItem = await transaction.balanceItem.findFirst({
+          where: { productId, balance: { status: { in: ["RASCUNHO", "ABERTO", "EM_REVISAO"] } } },
+          select: { id: true }
+        });
+        if (pendingBalanceItem) throw new Error("PRODUCT_IN_ACTIVE_BALANCE");
+        await transaction.product.update({ where: { id: productId }, data: { active: false } });
+        await transaction.identifier.updateMany({
+          where: { productId, active: true },
+          data: { active: false, revokedAt: new Date() }
+        });
+        await transaction.audit.create({
+          data: {
+            userId: actor.id,
+            action: "PRODUCT_DELETED",
+            objectType: "PRODUCT",
+            objectId: productId,
+            metadata: { internalCode: product.internalCode, name: product.name }
+          }
+        });
+      });
+      response.status(204).send();
+    } catch (error) {
+      if (error instanceof Error && error.message === "PRODUCT_NOT_FOUND") {
+        response.status(404).json({ error: { code: error.message, message: "Produto não encontrado.", details: [] } });
+        return;
+      }
+      if (error instanceof Error && error.message === "PRODUCT_IN_ACTIVE_BALANCE") {
+        response.status(409).json({ error: { code: error.message, message: "O produto está em um balanço em andamento ou rascunho. Encerre ou cancele esse balanço antes de excluir o produto.", details: [] } });
+        return;
+      }
+      next(error);
     }
   });
 

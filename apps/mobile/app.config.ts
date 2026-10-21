@@ -4,7 +4,7 @@ const config: ExpoConfig = {
   name: "Estoque",
   owner: "brennersardinha",
   slug: "estoque-inventario",
-  version: "0.3.2",
+  version: "0.3.4",
   orientation: "portrait",
   userInterfaceStyle: "light",
   icon: "./assets/icon.png",
@@ -16,7 +16,7 @@ const config: ExpoConfig = {
   scheme: "estoque",
   platforms: ["android", "ios"],
   extra: {
-    apiUrl: process.env.EXPO_PUBLIC_API_URL ?? "http://192.168.15.9:3000/api",
+    apiUrl: process.env.EXPO_PUBLIC_API_URL ?? "http://192.168.15.8:3000/api",
     eas: {
       projectId: "7007b09a-fe02-4539-b3af-8129bfce3bfb"
     }
@@ -35,12 +35,13 @@ const config: ExpoConfig = {
     bundleIdentifier: "com.projetoestoque.inventario",
     supportsTablet: false,
     infoPlist: {
+      ITSAppUsesNonExemptEncryption: false,
       NSCameraUsageDescription: "A câmera é usada para identificar produtos no inventário."
     }
   },
   android: {
     package: "com.projetoestoque.inventario",
-    versionCode: 6,
+    versionCode: 8,
     permissions: ["CAMERA"]
   }
 };

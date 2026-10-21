@@ -60,6 +60,7 @@ export function registerBalanceRoutes(router: Router) {
           name: true,
           kind: true,
           categoryId: true,
+          selectedCategories: { select: { category: { select: { id: true, name: true } } } },
           status: true,
           createdAt: true,
           openedAt: true,
@@ -85,6 +86,7 @@ export function registerBalanceRoutes(router: Router) {
           name: balance.name,
           kind: balance.kind,
           categoryId: balance.categoryId,
+          selectedCategories: balance.selectedCategories.map(({ category }) => category),
           status: balance.status,
           createdAt: balance.createdAt.toISOString(),
           openedAt: balance.openedAt?.toISOString() ?? null,
@@ -108,7 +110,7 @@ export function registerBalanceRoutes(router: Router) {
       const balance = await prisma.balance.findUnique({
         where: { id: balanceId },
         select: {
-          id: true, name: true, kind: true, categoryId: true, status: true, createdAt: true, openedAt: true,
+          id: true, name: true, kind: true, categoryId: true, selectedCategories: { select: { category: { select: { id: true, name: true } } } }, status: true, createdAt: true, openedAt: true,
           closedAt: true, cancelledAt: true, cancellationReason: true,
           createdBy: { select: { id: true, name: true, login: true } },
           assignments: { select: { user: { select: { id: true, name: true, login: true } } } },
@@ -171,6 +173,7 @@ export function registerBalanceRoutes(router: Router) {
           name: balance.name,
           kind: balance.kind,
           categoryId: balance.categoryId,
+          selectedCategories: balance.selectedCategories.map(({ category }) => category),
           status: balance.status,
           createdAt: balance.createdAt.toISOString(),
           openedAt: balance.openedAt?.toISOString() ?? null,
@@ -195,10 +198,12 @@ export function registerBalanceRoutes(router: Router) {
         name: z.string().trim().min(1).max(160),
         kind: z.enum(["CATEGORIA", "PERSONALIZADO"]).default("PERSONALIZADO"),
         categoryId: idSchema.optional(),
+        categoryIds: z.array(idSchema).max(500).optional(),
         sellerIds: z.array(idSchema).min(1).max(500),
         items: z.array(productSelectionSchema).max(10000).default([])
       }).parse(request.body);
-      if ((input.kind === "CATEGORIA") !== Boolean(input.categoryId) || (input.kind === "PERSONALIZADO" && input.items.length === 0)) {
+      const categoryIds = [...new Set(input.categoryIds ?? (input.categoryId ? [input.categoryId] : []))];
+      if ((input.kind === "CATEGORIA" && (!categoryIds.length || input.items.length > 0)) || (input.kind === "PERSONALIZADO" && (input.categoryId !== undefined || (!categoryIds.length && input.items.length === 0)))) {
         response.status(400).json({ error: { code: "INVALID_BALANCE_SOURCE", message: "Selecione uma categoria ou informe produtos para o balanço personalizado.", details: [] } });
         return;
       }
@@ -206,20 +211,25 @@ export function registerBalanceRoutes(router: Router) {
         response.status(400).json({ error: { code: "DUPLICATE_SELLER", message: "Um vendedor nao pode ser selecionado duas vezes.", details: [] } });
         return;
       }
-      const balanceItems = input.kind === "CATEGORIA"
-        ? (await prisma.product.findMany({ where: { categoryId: input.categoryId!, active: true }, select: { id: true } })).map(({ id }) => ({ productId: id, referenceQuantity: "0" }))
-        : input.items;
+      if (input.categoryIds && new Set(input.categoryIds).size !== input.categoryIds.length) {
+        response.status(400).json({ error: { code: "DUPLICATE_CATEGORY", message: "Uma categoria nao pode ser selecionada duas vezes.", details: [] } }); return;
+      }
+      if (new Set(input.items.map((item) => item.productId)).size !== input.items.length) {
+        response.status(400).json({ error: { code: "DUPLICATE_PRODUCT", message: "Um produto nao pode ser selecionado duas vezes.", details: [] } });
+        return;
+      }
+      const selectedCategories = categoryIds.length ? await prisma.category.findMany({ where: { id: { in: categoryIds }, active: true }, select: { id: true } }) : [];
+      if (selectedCategories.length !== categoryIds.length) { response.status(422).json({ error: { code: "CATEGORY_NOT_FOUND_OR_INACTIVE", message: "Todas as categorias devem existir e estar ativas.", details: [] } }); return; }
+      const categoryProducts = categoryIds.length ? await prisma.product.findMany({ where: { categoryId: { in: categoryIds }, active: true }, select: { id: true } }) : [];
+      const productMap = new Map<string, { productId: string; referenceQuantity: string; selectedIndividually: boolean }>();
+      if (input.kind === "CATEGORIA" || categoryIds.length) for (const product of categoryProducts) productMap.set(product.id, { productId: product.id, referenceQuantity: "0", selectedIndividually: false });
+      if (input.kind === "PERSONALIZADO") for (const item of input.items) productMap.set(item.productId, { ...item, selectedIndividually: true });
+      const balanceItems = [...productMap.values()];
       if (balanceItems.length === 0) {
         response.status(422).json({ error: { code: "CATEGORY_EMPTY", message: "Esta categoria nao possui produtos ativos.", details: [] } });
         return;
       }
       const productIds = balanceItems.map((item) => item.productId);
-      if (new Set(productIds).size !== productIds.length) {
-        response.status(400).json({
-          error: { code: "DUPLICATE_PRODUCT", message: "Um produto nao pode ser selecionado duas vezes.", details: [] }
-        });
-        return;
-      }
 
       const balance = await prisma.$transaction(async (transaction) => {
         const sellers = await transaction.user.findMany({
@@ -238,17 +248,19 @@ export function registerBalanceRoutes(router: Router) {
           data: {
             name: input.name,
             kind: input.kind,
-            categoryId: input.categoryId ?? null,
+            categoryId: input.kind === "CATEGORIA" && categoryIds.length === 1 ? categoryIds[0] ?? null : null,
+            selectedCategories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
             createdById: currentUser.id,
             assignments: { create: input.sellerIds.map((userId) => ({ userId })) },
             items: {
               create: balanceItems.map((item) => ({
                 productId: item.productId,
-                referenceQuantity: new Prisma.Decimal(item.referenceQuantity)
+                referenceQuantity: new Prisma.Decimal(item.referenceQuantity),
+                selectedIndividually: item.selectedIndividually
               }))
             }
           },
-          select: { id: true, name: true, kind: true, categoryId: true, status: true, createdAt: true, assignments: { select: { user: { select: { id: true, name: true } } } } }
+          select: { id: true, name: true, kind: true, categoryId: true, selectedCategories: { select: { category: { select: { id: true, name: true } } } }, status: true, createdAt: true, assignments: { select: { user: { select: { id: true, name: true } } } } }
         });
         await transaction.audit.create({
           data: {
@@ -288,13 +300,14 @@ export function registerBalanceRoutes(router: Router) {
         where: { id: balanceId },
         select: { id: true, name: true, kind: true, categoryId: true, status: true,
           assignments: { select: { userId: true } },
-          items: { select: { productId: true, referenceQuantity: true } } }
+          selectedCategories: { select: { categoryId: true } },
+          items: { where: { selectedIndividually: true }, select: { productId: true, referenceQuantity: true } } }
       });
       if (!balance) { response.status(404).json({ error: { code: "BALANCE_NOT_FOUND", message: "Balanço não encontrado.", details: [] } }); return; }
       if (balance.kind !== "PERSONALIZADO" || balance.status !== "RASCUNHO") {
         response.status(409).json({ error: { code: "CUSTOM_DRAFT_ONLY", message: "Somente balanços personalizados em rascunho podem ser editados.", details: [] } }); return;
       }
-      response.json({ ...balance, items: balance.items.map((item) => ({ ...item, referenceQuantity: item.referenceQuantity.toString() })) });
+      response.json({ ...balance, categoryIds: balance.selectedCategories.map(({ categoryId }) => categoryId), items: balance.items.map((item) => ({ ...item, referenceQuantity: item.referenceQuantity.toString() })) });
     } catch (error) { next(error); }
   });
 
@@ -302,7 +315,9 @@ export function registerBalanceRoutes(router: Router) {
     try {
       const currentUser = user(response);
       const balanceId = idSchema.parse(request.params.id);
-      const input = z.object({ name: z.string().trim().min(1).max(160), sellerIds: z.array(idSchema).min(1).max(500), items: z.array(productSelectionSchema).min(1).max(10000) }).parse(request.body);
+      const input = z.object({ name: z.string().trim().min(1).max(160), sellerIds: z.array(idSchema).min(1).max(500), categoryIds: z.array(idSchema).max(500).default([]), items: z.array(productSelectionSchema).max(10000).default([]) }).parse(request.body);
+      if (!input.categoryIds.length && !input.items.length) { response.status(400).json({ error: { code: "INVALID_BALANCE_SOURCE", message: "Selecione ao menos uma categoria ou um produto.", details: [] } }); return; }
+      if (new Set(input.categoryIds).size !== input.categoryIds.length) { response.status(400).json({ error: { code: "DUPLICATE_CATEGORY", message: "Uma categoria nao pode ser selecionada duas vezes.", details: [] } }); return; }
       if (new Set(input.sellerIds).size !== input.sellerIds.length || new Set(input.items.map((item) => item.productId)).size !== input.items.length) {
         response.status(400).json({ error: { code: "DUPLICATE_SELECTION", message: "Não repita vendedores ou produtos.", details: [] } }); return;
       }
@@ -310,23 +325,32 @@ export function registerBalanceRoutes(router: Router) {
         const balance = await transaction.balance.findUnique({ where: { id: balanceId }, select: { kind: true, status: true } });
         if (!balance) throw new Error("BALANCE_NOT_FOUND");
         if (balance.kind !== "PERSONALIZADO" || balance.status !== "RASCUNHO") throw new Error("CUSTOM_DRAFT_ONLY");
-        const [sellers, products] = await Promise.all([
+        const [sellers, products, categories] = await Promise.all([
           transaction.user.findMany({ where: { id: { in: input.sellerIds }, role: "VENDEDOR", active: true }, select: { id: true } }),
-          transaction.product.findMany({ where: { id: { in: input.items.map((item) => item.productId) }, active: true }, select: { id: true } })
+          transaction.product.findMany({ where: { id: { in: input.items.map((item) => item.productId) }, active: true }, select: { id: true } }),
+          transaction.category.findMany({ where: { id: { in: input.categoryIds }, active: true }, select: { id: true } })
         ]);
         if (sellers.length !== input.sellerIds.length) throw new Error("ASSIGNEE_NOT_ACTIVE_SELLER");
         if (products.length !== input.items.length) throw new Error("PRODUCT_NOT_FOUND_OR_INACTIVE");
+        if (categories.length !== input.categoryIds.length) throw new Error("CATEGORY_NOT_FOUND_OR_INACTIVE");
+        const categoryProducts = input.categoryIds.length ? await transaction.product.findMany({ where: { categoryId: { in: input.categoryIds }, active: true }, select: { id: true } }) : [];
+        const productMap = new Map<string, { productId: string; referenceQuantity: string; selectedIndividually: boolean }>();
+        for (const product of categoryProducts) productMap.set(product.id, { productId: product.id, referenceQuantity: "0", selectedIndividually: false });
+        for (const item of input.items) productMap.set(item.productId, { ...item, selectedIndividually: true });
+        if (!productMap.size) throw new Error("CATEGORY_EMPTY");
         await transaction.balance.update({ where: { id: balanceId }, data: { name: input.name } });
         await transaction.balanceItem.deleteMany({ where: { balanceId } });
-        await transaction.balanceItem.createMany({ data: input.items.map((item) => ({ balanceId, productId: item.productId, referenceQuantity: new Prisma.Decimal(item.referenceQuantity) })) });
+        await transaction.balanceItem.createMany({ data: [...productMap.values()].map((item) => ({ balanceId, productId: item.productId, referenceQuantity: new Prisma.Decimal(item.referenceQuantity), selectedIndividually: item.selectedIndividually })) });
+        await transaction.balanceCategory.deleteMany({ where: { balanceId } });
+        if (input.categoryIds.length) await transaction.balanceCategory.createMany({ data: input.categoryIds.map((categoryId) => ({ balanceId, categoryId })) });
         await transaction.balanceAssignment.deleteMany({ where: { balanceId } });
         await transaction.balanceAssignment.createMany({ data: input.sellerIds.map((userId) => ({ balanceId, userId })) });
-        await transaction.audit.create({ data: { userId: currentUser.id, action: "CUSTOM_BALANCE_UPDATED", objectType: "BALANCE", objectId: balanceId, metadata: { sellerIds: input.sellerIds, productCount: input.items.length } } });
+        await transaction.audit.create({ data: { userId: currentUser.id, action: "CUSTOM_BALANCE_UPDATED", objectType: "BALANCE", objectId: balanceId, metadata: { sellerIds: input.sellerIds, categoryIds: input.categoryIds, productCount: productMap.size } } });
       });
       response.json({ id: balanceId, updated: true });
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
-      const status = code === "BALANCE_NOT_FOUND" ? 404 : code === "CUSTOM_DRAFT_ONLY" ? 409 : code === "ASSIGNEE_NOT_ACTIVE_SELLER" || code === "PRODUCT_NOT_FOUND_OR_INACTIVE" ? 422 : 0;
+      const status = code === "BALANCE_NOT_FOUND" ? 404 : code === "CUSTOM_DRAFT_ONLY" ? 409 : code === "ASSIGNEE_NOT_ACTIVE_SELLER" || code === "PRODUCT_NOT_FOUND_OR_INACTIVE" || code === "CATEGORY_NOT_FOUND_OR_INACTIVE" || code === "CATEGORY_EMPTY" ? 422 : 0;
       if (status) { response.status(status).json({ error: { code, message: code === "CUSTOM_DRAFT_ONLY" ? "Somente balanços personalizados em rascunho podem ser editados." : "Os dados selecionados não são válidos.", details: [] } }); return; }
       next(error);
     }
@@ -370,7 +394,7 @@ export function registerBalanceRoutes(router: Router) {
       const updated = await prisma.$transaction(async (transaction) => {
         const balance = await transaction.balance.findUnique({ where: { id: balanceId }, select: { status: true, kind: true } });
         if (!balance) throw new Error("BALANCE_NOT_FOUND");
-        if (balance.status !== "RASCUNHO" || balance.kind !== "PERSONALIZADO") throw new Error("ASSIGNEES_LOCKED");
+        if (balance.status !== "RASCUNHO") throw new Error("ASSIGNEES_LOCKED");
         await transaction.balanceAssignment.deleteMany({ where: { balanceId } });
         await transaction.balanceAssignment.createMany({ data: input.sellerIds.map((userId) => ({ balanceId, userId })) });
         await transaction.audit.create({ data: { userId: currentUser.id, action: "BALANCE_ASSIGNEES_UPDATED", objectType: "BALANCE", objectId: balanceId, metadata: { sellerIds: input.sellerIds } } });

@@ -1,7 +1,7 @@
 {
   "name": "estoque-inventario",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.4",
   "description": "Sistema de inventario local para catalogo, balancos e contagens auditaveis.",
   "workspaces": [
     "apps/*",

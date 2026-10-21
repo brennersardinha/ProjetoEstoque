@@ -22,6 +22,8 @@ Estados: `[x]` implementado e validado; `[~]` implementado, aguardando validaç�
 - [~] Organizar a listagem web em pastas expansíveis por categoria, com quantidade de produtos.
 - [~] Manter ações de produto dentro da categoria correspondente e impressão de QR por categoria.
 - [~] Carregar catálogo completo com paginação da API para que categorias grandes não sejam truncadas.
+- [~] Editar produtos existentes e trocar sua foto pela lista de ações, validando a senha do ADMIN autenticado na API.
+- [~] Excluir produtos com botão vermelho e confirmação por senha; a exclusão lógica desativa QR Codes e preserva históricos de balanço.
 - [ ] Conferir categorias sem produtos, catálogo grande e permissões no servidor em uso.
 
 ## Impressão de QR Codes
@@ -39,6 +41,14 @@ Estados: `[x]` implementado e validado; `[~]` implementado, aguardando validaç�
 - [~] Restringir endpoint de relatório e acesso ao histórico completo a ADMIN.
 - [ ] Conferir balanços abertos, encerrados, cancelados, vazios e com muitas categorias em navegador e impressão física.
 
+## Seleção de categorias e produtos no balanço
+
+- [x] Permitir uma ou mais categorias em balanços por categoria, exigindo pelo menos uma categoria.
+- [x] Permitir, em balanços personalizados, combinar categorias inteiras e produtos avulsos.
+- [x] Persistir categorias selecionadas e produtos incluídos dentro delas, preservando a seleção para edição e relatório.
+- [x] Permitir corrigir os vendedores destinados em qualquer rascunho antes da abertura.
+- [ ] Validar no uso categorias múltiplas, categorias vazias, produtos avulsos e edição de rascunhos.
+
 ## Destinação de vendedores e contagem por QR
 
 - [~] Exigir um ou mais vendedores ativos ao criar um balanço e impedir a abertura de rascunho sem vendedor.
@@ -52,19 +62,19 @@ Estados: `[x]` implementado e validado; `[~]` implementado, aguardando validaç�
 
 - [x] Executar builds de API, web e mobile; corrigir erros e registrar resultados abaixo.
 - [~] Exercitar as rotas de histórico e relatório com conta ADMIN e confirmar bloqueio para vendedor. A proteção ADMIN está aplicada no código; falta validação autenticada no ambiente com contas de teste.
-- [x] Alinhar a versão do servidor, painel, desktop e mobile em 0.3.2 (Android versionCode 6); gerar o instalador Windows com a tag 0.3.2.
+- [x] Servidor/painel/desktop na versão 0.3.3; mobile 0.3.2 (Android versionCode 6). Instalador Windows 0.3.3 gerado com as novas ações de produto.
 - [x] Registrar os links dos artefatos Expo e do pacote de implantação do servidor nesta seção.
 
 ### Artefatos desta versão
 
-- Expo Android preview: https://expo.dev/accounts/brennersardinha/projects/estoque-inventario/builds/9c53a593-f8da-4d78-8cb8-aee549d0c479
-- Instalador Windows do painel e servidor 0.3.2: `release/Estoque Setup 0.3.2.exe`.
-- Expo Android preview 0.3.2: build enviado, ainda aguardando início/conclusão na fila EAS.
+- Expo Android preview 0.3.2 com API em 192.168.15.8: https://expo.dev/accounts/brennersardinha/projects/estoque-inventario/builds/6c8d0869-2468-4c73-a029-713467765594 (build enviado; aguarda conclusão na fila EAS).
+- Instalador Windows do painel e servidor 0.3.3: `release/Estoque Setup 0.3.3.exe`.
 
 ### Evidências
 
 - Build API aprovado com `npm run build --workspace @estoque/api`; build web aprovado com `npm run build --workspace @estoque/web`; verificação TypeScript mobile aprovada com `npm run build --workspace @estoque/mobile`.
-- API local respondeu `GET /api/health` com `status: ok`; Docker Compose não pôde ser consultado porque o Docker Desktop negou acesso ao engine nesta sessão.
+- Em 21/10/2026, builds API e web aprovados; instalador `Estoque Setup 0.3.3.exe` gerado com o painel atualizado e a API incluída.
+- Em 21/10/2026, os containers foram confirmados ativos e saudáveis: API na porta 3000 e PostgreSQL na 5433. `GET /api/health` respondeu em `192.168.15.8:3000`; `192.168.15.9:3000` expirou. Build mobile atualizado para apontar ao IP atual; reservar esse IP no roteador evita nova divergência.
 - Migration `20261020160000_product_photos` adiciona URL da foto do produto; o Compose preserva imagens no volume `estoque-product-photos`.
 - Migration de destinação aplicada no banco local em 17/10/2026, depois de gerar backup; API e banco confirmados ativos.
 - Testes existentes da API: 4 aprovados. Não há teste automatizado cobrindo o novo fluxo de relatório ou impressão.

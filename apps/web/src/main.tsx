@@ -4,13 +4,13 @@ import "./styles.css";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000/api";
 type User = { id: string; name: string; login: string; role: "ADMIN" | "VENDEDOR" };
-type Product = { id: string; internalCode: string; name: string; unit: string; photoUrl?: string | null; category: { id: string; name: string }; identifiers?: { normalizedValue: string }[] };
+type Product = { id: string; internalCode: string; name: string; unit: string; photoUrl?: string | null; category: { id: string; name: string }; identifiers?: { type?: "QR" | "BARCODE"; normalizedValue: string }[] };
 type Category = { id: string; name: string };
-type Balance = { id: string; name: string; kind: "CATEGORIA" | "PERSONALIZADO"; categoryId?: string | null; status: string; itemCount: number; myCountedItemCount: number; createdAt?: string; openedAt?: string | null; closedAt?: string | null; cancelledAt?: string | null; cancellationReason?: string | null; createdBy?: { id: string; name: string; login: string }; assignedSellers?: { id: string; name: string; login: string; active: boolean }[] };
+type Balance = { id: string; name: string; kind: "CATEGORIA" | "PERSONALIZADO"; categoryId?: string | null; selectedCategories?: Category[]; status: string; itemCount: number; myCountedItemCount: number; createdAt?: string; openedAt?: string | null; closedAt?: string | null; cancelledAt?: string | null; cancellationReason?: string | null; createdBy?: { id: string; name: string; login: string }; assignedSellers?: { id: string; name: string; login: string; active: boolean }[] };
 type BalanceCount = { id: string; quantity: string; countedAt: string; countedBy: { id: string; name: string }; observation: string | null; isRecount: boolean };
 type BalanceDetailItem = { id: string; referenceQuantity: string; status: string; product: Product; counts: BalanceCount[] };
 type BalanceReportItem = { id: string; product: Product; referenceQuantity: string; finalQuantity: string | null; status: string; approvedAt: string | null; approvedBy: { id: string; name: string; login: string } | null; counts: (BalanceCount & { countedBy: { id: string; name: string; login: string }; approved: boolean })[] };
-type BalanceReport = { generatedAt: string; balance: { id: string; name: string; status: string; createdAt: string; openedAt: string | null; closedAt: string | null; cancelledAt: string | null; cancellationReason: string | null; createdBy: { id: string; name: string; login: string }; assignedSellers: { id: string; name: string; login: string }[]; itemCount: number }; categories: { id: string; name: string; items: BalanceReportItem[] }[] };
+type BalanceReport = { generatedAt: string; balance: { id: string; name: string; kind: "CATEGORIA" | "PERSONALIZADO"; categoryId: string | null; selectedCategories: Category[]; status: string; createdAt: string; openedAt: string | null; closedAt: string | null; cancelledAt: string | null; cancellationReason: string | null; createdBy: { id: string; name: string; login: string }; assignedSellers: { id: string; name: string; login: string }[]; itemCount: number }; categories: { id: string; name: string; items: BalanceReportItem[] }[] };
 type BalanceDetailView = { balance: Balance; report?: BalanceReport; items?: BalanceDetailItem[] };
 type ManagedUser = { id: string; name: string; login: string; role: "ADMIN" | "VENDEDOR"; active: boolean; createdAt: string; updatedAt: string };
 
@@ -163,6 +163,14 @@ function Products({ token }: { token: string }) {
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [editDraft, setEditDraft] = useState({ internalCode: "", name: "", unit: "UN", categoryId: "", barcode: "" });
+  const [editPassword, setEditPassword] = useState("");
+  const [editPhoto, setEditPhoto] = useState<File | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [productActionPending, setProductActionPending] = useState(false);
   const load = async () => {
     setLoading(true);
     setError("");
@@ -225,6 +233,80 @@ function Products({ token }: { token: string }) {
       setError(reason instanceof Error ? reason.message : "Falha ao cadastrar produto.");
     }
   }
+  function beginEditProduct(product: Product) {
+    setEditingProduct(product);
+    setEditDraft({
+      internalCode: product.internalCode,
+      name: product.name,
+      unit: product.unit,
+      categoryId: product.category.id,
+      barcode: product.identifiers?.find((identifier) => identifier.type === "BARCODE")?.normalizedValue ?? ""
+    });
+    setEditPassword("");
+    setEditPhoto(null);
+    setError("");
+  }
+  function closeEditProduct() {
+    if (productActionPending) return;
+    setEditingProduct(null);
+    setEditPassword("");
+    setEditPhoto(null);
+  }
+  async function saveProduct(event: FormEvent) {
+    event.preventDefault();
+    if (!editingProduct || productActionPending) return;
+    setProductActionPending(true);
+    setError("");
+    setMessage("");
+    let photoUploadError = "";
+    try {
+      await api<Product>(`/products/${editingProduct.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ ...editDraft, currentPassword: editPassword })
+      }, token);
+      if (editPhoto) {
+        const photo = new FormData();
+        photo.append("photo", editPhoto);
+        try { await api(`/products/${editingProduct.id}/photo`, { method: "POST", body: photo }, token); }
+        catch (reason) { photoUploadError = reason instanceof Error ? reason.message : "Falha ao enviar a foto."; }
+      }
+      setEditingProduct(null);
+      setEditPassword("");
+      setEditPhoto(null);
+      await load();
+      setMessage(photoUploadError
+        ? `Dados do produto atualizados, mas a foto não foi enviada: ${photoUploadError}`
+        : "Produto atualizado com sucesso.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha ao atualizar o produto.");
+    } finally { setProductActionPending(false); }
+  }
+  async function deleteProduct(event: FormEvent) {
+    event.preventDefault();
+    if (!deleteTarget || productActionPending) return;
+    if (deleteConfirmation !== "EXCLUIR") {
+      setError('Digite EXCLUIR para confirmar a remoção do produto.');
+      return;
+    }
+    setProductActionPending(true);
+    setError("");
+    setMessage("");
+    try {
+      await api(`/products/${deleteTarget.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ currentPassword: deletePassword })
+      }, token);
+      const deletedId = deleteTarget.id;
+      setDeleteTarget(null);
+      setDeletePassword("");
+      setDeleteConfirmation("");
+      setSelectedLabels((current) => current.filter((id) => id !== deletedId));
+      await load();
+      setMessage("Produto removido do catálogo. Os balanços e relatórios anteriores foram preservados.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha ao remover o produto.");
+    } finally { setProductActionPending(false); }
+  }
   async function printQrLabel(product: Product) {
     setError("");
     try {
@@ -271,8 +353,25 @@ function Products({ token }: { token: string }) {
     <section className="card"><div className="card-heading"><div><h2>Catálogo por categoria</h2><p>{products.length} produtos em {categories.length} pastas</p></div><span className="badge">{categories.length} categorias</span></div><div className="catalog-toolbar"><button disabled={selectedLabels.length === 0 || loading} onClick={() => void printProducts(products.filter((product) => selectedLabels.includes(product.id)), "Etiquetas QR selecionadas")}>Imprimir selecionados ({selectedLabels.length})</button><button onClick={() => void load()} disabled={loading}>{loading ? "Atualizando…" : "Atualizar catálogo"}</button></div>{loading && products.length === 0 ? <div className="empty" role="status">Carregando pastas do catálogo…</div> : categories.map((category) => {
       const categoryProducts = products.filter((product) => product.category.id === category.id);
       const expanded = openCategory === category.id;
-      return <section className={`category-folder ${expanded ? "is-open" : ""}`} key={category.id}><div className="folder-heading"><button className="folder-toggle" aria-expanded={expanded} onClick={() => setOpenCategory(expanded ? null : category.id)}><span className="folder-icon" aria-hidden="true">{expanded ? "▾" : "▸"}</span><span className="folder-name">{category.name}</span><span className="badge">{categoryProducts.length} produtos</span></button><button disabled={!categoryProducts.length || loading} onClick={() => void printCategory(category, categoryProducts)}>Imprimir QR da categoria</button></div>{expanded && <div className="table-wrap"><table><thead><tr><th>QR</th><th>Código interno</th><th>Produto</th><th>Unidade</th><th>Ações</th></tr></thead><tbody>{categoryProducts.map((product) => <tr key={product.id}><td><input type="checkbox" aria-label={`Selecionar etiqueta de ${product.name}`} checked={selectedLabels.includes(product.id)} onChange={(event) => setSelectedLabels((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /></td><td className="code">{product.internalCode}</td><td>{product.name}</td><td><span className="unit">{product.unit}</span></td><td><button onClick={() => void printQrLabel(product)}>Imprimir QR</button> <button onClick={() => void regenerateQr(product)}>Regenerar QR</button></td></tr>)}</tbody></table>{categoryProducts.length === 0 && <div className="empty">Esta pasta ainda não tem produtos.</div>}</div>}</section>;
-    })}{!loading && categories.length === 0 && <div className="empty">Nenhuma categoria cadastrada.</div>}</section></>;
+      return <section className={`category-folder ${expanded ? "is-open" : ""}`} key={category.id}><div className="folder-heading"><button className="folder-toggle" aria-expanded={expanded} onClick={() => setOpenCategory(expanded ? null : category.id)}><span className="folder-icon" aria-hidden="true">{expanded ? "▾" : "▸"}</span><span className="folder-name">{category.name}</span><span className="badge">{categoryProducts.length} produtos</span></button><button disabled={!categoryProducts.length || loading} onClick={() => void printCategory(category, categoryProducts)}>Imprimir QR da categoria</button></div>{expanded && <div className="table-wrap"><table><thead><tr><th>QR</th><th>Código interno</th><th>Produto</th><th>Unidade</th><th>Ações</th></tr></thead><tbody>{categoryProducts.map((product) => <tr key={product.id}><td><input type="checkbox" aria-label={`Selecionar etiqueta de ${product.name}`} checked={selectedLabels.includes(product.id)} onChange={(event) => setSelectedLabels((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /></td><td className="code">{product.internalCode}</td><td>{product.name}</td><td><span className="unit">{product.unit}</span></td><td><div className="product-actions"><button disabled={productActionPending} onClick={() => beginEditProduct(product)}>Editar</button><button disabled={productActionPending} className="danger-solid" onClick={() => { setDeleteTarget(product); setDeletePassword(""); setDeleteConfirmation(""); setError(""); }}>Excluir</button><button onClick={() => void printQrLabel(product)}>Imprimir QR</button><button onClick={() => void regenerateQr(product)}>Regenerar QR</button></div></td></tr>)}</tbody></table>{categoryProducts.length === 0 && <div className="empty">Esta pasta ainda não tem produtos.</div>}</div>}</section>;
+    })}{!loading && categories.length === 0 && <div className="empty">Nenhuma categoria cadastrada.</div>}</section>
+    {editingProduct && <Modal title={`Editar produto · ${editingProduct.name}`} onClose={closeEditProduct}><form className="dialog-form" onSubmit={saveProduct}>
+      <label>Código interno<input value={editDraft.internalCode} onChange={(event) => setEditDraft({ ...editDraft, internalCode: event.target.value })} maxLength={120} required /></label>
+      <label>Nome do produto<input value={editDraft.name} onChange={(event) => setEditDraft({ ...editDraft, name: event.target.value })} maxLength={200} required /></label>
+      <label>Unidade<select value={editDraft.unit} onChange={(event) => setEditDraft({ ...editDraft, unit: event.target.value })}><option value="UN">UN</option><option value="CX">CX</option><option value="MT">MT</option><option value="ROLO">ROLO</option></select></label>
+      <label>Categoria<select value={editDraft.categoryId} onChange={(event) => setEditDraft({ ...editDraft, categoryId: event.target.value })} required>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+      <label>Código de barras<input value={editDraft.barcode} onChange={(event) => setEditDraft({ ...editDraft, barcode: event.target.value })} maxLength={255} /><small>Deixe vazio para remover o código de barras atual.</small></label>
+      <label>Trocar foto do produto<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditPhoto(event.target.files?.[0] ?? null)} /><small>{editPhoto ? editPhoto.name : editingProduct.photoUrl ? "Selecione uma foto para substituir a atual." : "Sem foto cadastrada. JPEG, PNG ou WebP · até 5 MB."}</small></label>
+      <label>Senha do administrador<input type="password" value={editPassword} onChange={(event) => setEditPassword(event.target.value)} autoComplete="current-password" required /></label>
+      {error && <div className="error" role="alert">{error}</div>}<div className="dialog-actions"><button type="button" disabled={productActionPending} onClick={closeEditProduct}>Cancelar</button><button className="primary" disabled={productActionPending}>{productActionPending ? "Salvando…" : "Salvar alterações"}</button></div>
+    </form></Modal>}
+    {deleteTarget && <Modal title={`Excluir produto · ${deleteTarget.name}`} onClose={() => { if (!productActionPending) { setDeleteTarget(null); setDeletePassword(""); setDeleteConfirmation(""); } }}><form className="dialog-form" onSubmit={deleteProduct}>
+      <p>O produto será retirado do catálogo e seus QR Codes serão desativados. Balanços e relatórios anteriores serão preservados.</p>
+      <label>Senha do administrador<input type="password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} autoComplete="current-password" required /></label>
+      <label>Digite EXCLUIR para confirmar<input value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off" required /></label>
+      {error && <div className="error" role="alert">{error}</div>}<div className="dialog-actions"><button type="button" disabled={productActionPending} onClick={() => { setDeleteTarget(null); setDeletePassword(""); setDeleteConfirmation(""); }}>Cancelar</button><button className="danger-solid" disabled={productActionPending}>{productActionPending ? "Excluindo…" : "Excluir produto"}</button></div>
+    </form></Modal>}
+    </>;
 }
 
 function escapeHtml(value: string) {
@@ -357,13 +456,14 @@ function BalanceDetailsScreen({ detail, categories, isAdmin, onBack, onOpen, onE
       <div><button className="detail-back" onClick={onBack}>← Histórico de balanços</button><span className="eyebrow">DETALHES DO BALANÇO</span><h2>{balance.name}</h2><p>Informações, responsáveis, datas e itens deste balanço.</p></div>
       <div className="balance-detail-actions">
         {isAdmin && balance.status === "RASCUNHO" && <button className="primary" disabled={!balance.assignedSellers?.some((seller) => seller.active)} onClick={onOpen}>Abrir balanço</button>}
-        {isAdmin && balance.status === "RASCUNHO" && balance.kind === "PERSONALIZADO" && <><button onClick={onEdit}>Editar</button><button onClick={onAssign}>Destinar vendedores</button><button className="danger-button" onClick={onDelete}>Excluir</button></>}
+        {isAdmin && balance.status === "RASCUNHO" && <button onClick={onAssign}>Destinar vendedores</button>}
+        {isAdmin && balance.status === "RASCUNHO" && balance.kind === "PERSONALIZADO" && <><button onClick={onEdit}>Editar</button><button className="danger-button" onClick={onDelete}>Excluir</button></>}
         {isAdmin && ["ABERTO", "EM_REVISAO"].includes(balance.status) && <button className="primary" onClick={onFinalize}>Finalizar</button>}
         {isAdmin && <button onClick={onPrint}>Emitir balanço</button>}
       </div>
     </div>
     <div className="detail-meta">
-      <div><b>Tipo</b><span>{balance.kind === "CATEGORIA" ? `Categoria · ${categories.find((category) => category.id === balance.categoryId)?.name ?? "—"}` : "Personalizado"}</span></div>
+      <div><b>Tipo</b><span>{balance.kind === "CATEGORIA" ? `Categorias · ${(balance.selectedCategories?.length ? balance.selectedCategories.map((category) => category.name) : [categories.find((category) => category.id === balance.categoryId)?.name ?? "—"]).join(", ")}` : "Personalizado"}</span></div>
       <div><b>Status</b><span>{balance.status}</span></div>
       <div><b>Total de itens</b><span>{balance.itemCount}</span></div>
       <div><b>Criado em</b><span>{balance.createdAt ? formatDate(balance.createdAt) : "—"}</span></div>
@@ -396,7 +496,8 @@ function Balances({ token, user }: { token: string; user: User }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [balanceMode, setBalanceMode] = useState<"choose" | "category" | "custom">("choose");
-  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [expandedCategoryIds, setExpandedCategoryIds] = useState<string[]>([]);
   const [editingCustom, setEditingCustom] = useState<Balance | null>(null);
   const [sellers, setSellers] = useState<ManagedUser[]>([]);
   const [name, setName] = useState("");
@@ -435,18 +536,19 @@ function Balances({ token, user }: { token: string; user: User }) {
     const items = Object.entries(selected).filter(([, quantity]) => quantity !== "").map(([productId, referenceQuantity]) => ({ productId, referenceQuantity }));
     try {
       const payload = balanceMode === "category"
-        ? { name: categories.find((category) => category.id === selectedCategoryId)?.name ?? "", kind: "CATEGORIA", categoryId: selectedCategoryId, sellerIds: selectedSellerIds, items: [] }
-        : { name, kind: "PERSONALIZADO", sellerIds: selectedSellerIds, items };
+        ? { name: categories.filter((category) => selectedCategoryIds.includes(category.id)).map((category) => category.name).join(", ").slice(0, 160), kind: "CATEGORIA", categoryIds: selectedCategoryIds, sellerIds: selectedSellerIds, items: [] }
+        : { name, kind: "PERSONALIZADO", categoryIds: selectedCategoryIds, sellerIds: selectedSellerIds, items };
       await api("/balances", { method: "POST", body: JSON.stringify(payload) }, token);
-      setName(""); setSelected({}); setSelectedSellerIds([]); setBalanceMode("choose"); setSelectedCategoryId(""); await load(); setMessage("Rascunho criado e destinado aos vendedores selecionados. Abra o balanço para liberar as contagens.");
+      setName(""); setSelected({}); setSelectedCategoryIds([]); setSelectedSellerIds([]); setBalanceMode("choose"); await load(); setMessage("Rascunho criado e destinado aos vendedores selecionados. Abra o balanço para liberar as contagens.");
     }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Falha ao criar balanço."); }
   }
   async function editCustom(balance: Balance) {
     setError(""); setMessage("");
     try {
-      const draft = await api<{ id: string; name: string; items: { productId: string; referenceQuantity: string }[]; assignments: { userId: string }[] }>(`/balances/${balance.id}/draft`, {}, token);
+      const draft = await api<{ id: string; name: string; categoryIds: string[]; items: { productId: string; referenceQuantity: string }[]; assignments: { userId: string }[] }>(`/balances/${balance.id}/draft`, {}, token);
       setEditingCustom(balance); setBalanceMode("custom"); setName(draft.name);
+      setSelectedCategoryIds(draft.categoryIds);
       setSelected(Object.fromEntries(draft.items.map((item) => [item.productId, item.referenceQuantity])));
       setSelectedSellerIds(draft.assignments.map((assignment) => assignment.userId));
       leaveDetails();
@@ -455,10 +557,10 @@ function Balances({ token, user }: { token: string; user: User }) {
   async function saveCustom(event: FormEvent) {
     event.preventDefault();
     if (!editingCustom) return create(event);
-    const items = Object.entries(selected).map(([productId, referenceQuantity]) => ({ productId, referenceQuantity }));
+    const items = Object.entries(selected).filter(([, referenceQuantity]) => referenceQuantity !== "").map(([productId, referenceQuantity]) => ({ productId, referenceQuantity }));
     try {
-      await api(`/balances/${editingCustom.id}/custom`, { method: "PUT", body: JSON.stringify({ name, sellerIds: selectedSellerIds, items }) }, token);
-      setEditingCustom(null); setName(""); setSelected({}); setSelectedSellerIds([]); setBalanceMode("choose"); await load(); setMessage("Balanço personalizado atualizado.");
+      await api(`/balances/${editingCustom.id}/custom`, { method: "PUT", body: JSON.stringify({ name, sellerIds: selectedSellerIds, categoryIds: selectedCategoryIds, items }) }, token);
+      setEditingCustom(null); setName(""); setSelected({}); setSelectedCategoryIds([]); setSelectedSellerIds([]); setBalanceMode("choose"); await load(); setMessage("Balanço personalizado atualizado.");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Falha ao atualizar balanço personalizado."); }
   }
   async function deleteCustom(balance: Balance) {
@@ -552,7 +654,7 @@ function Balances({ token, user }: { token: string; user: User }) {
       page.document.close();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Falha ao gerar o relatório do balanço."); }
   }
-  const selectedCount = useMemo(() => Object.values(selected).filter(Boolean).length, [selected]);
+  const selectedCount = useMemo(() => new Set([...Object.keys(selected), ...products.filter((product) => selectedCategoryIds.includes(product.category.id)).map((product) => product.id)]).size, [selected, selectedCategoryIds, products]);
   const canCount = (balance: Balance) => ["ABERTO", "EM_REVISAO"].includes(balance.status);
   if (detail) return <>
     {error && <div className="error" role="alert">{error}</div>}{message && <div className="success" role="status">{message}</div>}
@@ -562,38 +664,49 @@ function Balances({ token, user }: { token: string; user: User }) {
   return <>
     {isAdmin && <section className="card"><div className="card-heading"><div><h2>{editingCustom ? "Editar balanço personalizado" : "Criar balanço"}</h2><p>Escolha uma categoria inteira ou monte um balanço personalizado com produtos selecionados.</p></div>{balanceMode === "custom" && <span className="badge">{selectedCount} produtos</span>}</div>
       {balanceMode === "choose" && <div className="balance-mode-grid"><button className="balance-mode-card" onClick={() => setBalanceMode("category")}><span className="mode-icon">▰</span><strong>Balanço por categoria</strong><small>Inclui todos os produtos ativos de uma categoria.</small></button><button className="balance-mode-card" onClick={() => setBalanceMode("custom")}><span className="mode-icon">✳</span><strong>Personalizar balanço</strong><small>Defina um nome e escolha os produtos que farão parte.</small></button></div>}
-      {balanceMode !== "choose" && <form onSubmit={saveCustom}><div className="form-actions"><button type="button" onClick={() => { setBalanceMode("choose"); setEditingCustom(null); setName(""); setSelected({}); setSelectedSellerIds([]); }}>← Voltar</button></div>
+      {balanceMode !== "choose" && <form onSubmit={saveCustom}><div className="form-actions"><button type="button" onClick={() => { setBalanceMode("choose"); setEditingCustom(null); setName(""); setSelected({}); setSelectedCategoryIds([]); setSelectedSellerIds([]); }}>← Voltar</button></div>
         {balanceMode === "category" ? (
-          <label>Categoria<select value={selectedCategoryId} onChange={(event) => setSelectedCategoryId(event.target.value)} required><option value="">Selecione uma categoria...</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name} ({products.filter((product) => product.category.id === category.id).length} produtos)</option>)}</select></label>
+          <fieldset className="seller-picker"><legend>Selecione uma ou mais categorias <span aria-hidden="true">*</span></legend>{categories.map((category) => <label className="seller-option" key={category.id}><input type="checkbox" checked={selectedCategoryIds.includes(category.id)} onChange={(event) => setSelectedCategoryIds((current) => event.target.checked ? [...current, category.id] : current.filter((id) => id !== category.id))} /><span>{category.name}<small>{products.filter((product) => product.category.id === category.id).length} produtos ativos</small></span></label>)}</fieldset>
         ) : (
           <>
             <label>Nome do balanço personalizado<input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Conferência de bebidas" required /></label>
             <div className="product-picker">
-              {products.map((product) => (
-                <label className="picker-row" key={product.id}>
-                  <input type="checkbox" checked={product.id in selected} onChange={(event) => setSelected((current) => {
-                    const next = { ...current };
-                    if (event.target.checked) next[product.id] = "0"; else delete next[product.id];
-                    return next;
-                  })} />
-                  <span>{product.name}<small>{product.category.name} · {product.internalCode} · {product.unit}</small></span>
-                  {product.id in selected && <input className="quantity" value={selected[product.id]} onChange={(event) => setSelected((current) => ({ ...current, [product.id]: event.target.value }))} aria-label={`Saldo de ${product.name}`} />}
-                </label>
-              ))}
+              {categories.map((category) => {
+                const categoryProducts = products.filter((product) => product.category.id === category.id);
+                const wholeCategory = selectedCategoryIds.includes(category.id);
+                const expanded = expandedCategoryIds.includes(category.id);
+                return <section className="custom-category-group" key={category.id}>
+                  <div className="custom-category-heading">
+                    <button type="button" aria-expanded={expanded} onClick={() => setExpandedCategoryIds((current) => expanded ? current.filter((id) => id !== category.id) : [...current, category.id])}>{expanded ? "▾" : "▸"} {category.name} ({categoryProducts.length})</button>
+                    <label><input type="checkbox" checked={wholeCategory} onChange={(event) => setSelectedCategoryIds((current) => event.target.checked ? [...current, category.id] : current.filter((id) => id !== category.id))} /> Incluir categoria inteira</label>
+                  </div>
+                  {expanded && <div className="custom-category-products">{categoryProducts.map((product) => {
+                    const individual = product.id in selected;
+                    return <label className="picker-row" key={product.id}>
+                      <input type="checkbox" checked={individual || wholeCategory} disabled={wholeCategory} onChange={(event) => setSelected((current) => {
+                        const next = { ...current };
+                        if (event.target.checked) next[product.id] = "0"; else delete next[product.id];
+                        return next;
+                      })} />
+                      <span>{product.name}<small>{product.internalCode} · {product.unit}{wholeCategory ? " · incluído pela categoria" : ""}</small></span>
+                      {(individual || wholeCategory) && <input className="quantity" value={selected[product.id] ?? "0"} onChange={(event) => setSelected((current) => ({ ...current, [product.id]: event.target.value }))} aria-label={`Saldo de ${product.name}`} />}
+                    </label>;
+                  })}</div>}
+                </section>;
+              })}
             </div>
           </>
         )}
         <fieldset className="seller-picker"><legend>Destinar a vendedores <span aria-hidden="true">*</span></legend>{sellers.length ? sellers.map((seller) => <label className="seller-option" key={seller.id}><input type="checkbox" checked={selectedSellerIds.includes(seller.id)} onChange={(event) => setSelectedSellerIds((current) => event.target.checked ? [...current, seller.id] : current.filter((id) => id !== seller.id))} /><span>{seller.name}<small>{seller.login}</small></span></label>) : <p className="muted">Cadastre e ative ao menos um usuário com papel VENDEDOR antes de criar o balanço.</p>}</fieldset>
-        <button className="primary" type="submit" disabled={!sellers.length || !selectedSellerIds.length || (balanceMode === "category" ? !selectedCategoryId : !selectedCount)}>{editingCustom ? "Salvar alterações" : "Criar rascunho"}</button></form>}</section>}
+        <button className="primary" type="submit" disabled={!sellers.length || !selectedSellerIds.length || (balanceMode === "category" ? !selectedCategoryIds.length : !selectedCount)}>{editingCustom ? "Salvar alterações" : "Criar rascunho"}</button></form>}</section>}
     {error && <div className="error" role="alert">{error}</div>}{message && <div className="success" role="status">{message}</div>}
     {error && <div className="error" role="alert">{error}</div>}
-    <section className="card"><div className="card-heading"><div><h2>{isAdmin ? "Histórico de balanços" : "Balanços em andamento"}</h2><p>{isAdmin ? "Abra ou consulte os detalhes de cada balanço." : "Somente balanços destinados a você aparecem aqui."}</p></div><button onClick={() => void load()} disabled={loading}>{loading ? "Carregando…" : "Atualizar"}</button></div><div className="table-wrap"><table><thead><tr>{isAdmin && <th>Tipo</th>}<th>Nome</th><th>Status</th><th>Itens</th>{isAdmin && <><th>Responsável</th><th>Vendedores destinados</th><th>Criado em</th></>}<th>Ações</th></tr></thead><tbody>{balances.map((balance) => <tr key={balance.id}>{isAdmin && <td>{balance.kind === "CATEGORIA" ? `Categoria · ${categories.find((category) => category.id === balance.categoryId)?.name ?? "—"}` : "Personalizado"}</td>}<td>{balance.name}</td><td><span className="status">{balance.status}</span></td><td>{balance.itemCount}</td>{isAdmin && <><td>{balance.createdBy?.name ?? "—"}</td><td>{balance.assignedSellers?.map((seller) => seller.name).join(", ") || "Sem vendedor"}</td><td>{balance.createdAt ? formatDate(balance.createdAt) : "—"}</td></>}<td className="balance-actions"><button aria-label={`Detalhes do balanço ${balance.name}`} onClick={() => showDetails(balance)}>Detalhes</button></td></tr>)}</tbody></table>{!loading && balances.length === 0 && <div className="empty">Nenhum balanço encontrado.</div>}</div></section>
+    <section className="card"><div className="card-heading"><div><h2>{isAdmin ? "Histórico de balanços" : "Balanços em andamento"}</h2><p>{isAdmin ? "Abra ou consulte os detalhes de cada balanço." : "Somente balanços destinados a você aparecem aqui."}</p></div><button onClick={() => void load()} disabled={loading}>{loading ? "Carregando…" : "Atualizar"}</button></div><div className="table-wrap"><table><thead><tr>{isAdmin && <th>Tipo</th>}<th>Nome</th><th>Status</th><th>Itens</th>{isAdmin && <><th>Responsável</th><th>Vendedores destinados</th><th>Criado em</th></>}<th>Ações</th></tr></thead><tbody>{balances.map((balance) => <tr key={balance.id}>{isAdmin && <td>{balance.kind === "CATEGORIA" ? `Categorias · ${(balance.selectedCategories?.length ? balance.selectedCategories.map((category) => category.name) : [categories.find((category) => category.id === balance.categoryId)?.name ?? "—"]).join(", ")}` : "Personalizado"}</td>}<td>{balance.name}</td><td><span className="status">{balance.status}</span></td><td>{balance.itemCount}</td>{isAdmin && <><td>{balance.createdBy?.name ?? "—"}</td><td>{balance.assignedSellers?.map((seller) => seller.name).join(", ") || "Sem vendedor"}</td><td>{balance.createdAt ? formatDate(balance.createdAt) : "—"}</td></>}<td className="balance-actions"><button aria-label={`Detalhes do balanço ${balance.name}`} onClick={() => showDetails(balance)}>Detalhes</button></td></tr>)}</tbody></table>{!loading && balances.length === 0 && <div className="empty">Nenhum balanço encontrado.</div>}</div></section>
     {assignmentBalance && <section className="card"><div className="card-heading"><div><h2>Vendedores: {assignmentBalance.name}</h2><p>Um rascunho precisa ter pelo menos um vendedor antes de ser aberto.</p></div><button onClick={() => setAssignmentBalance(null)}>Cancelar</button></div><form onSubmit={(event) => void updateAssignees(event)}><fieldset className="seller-picker"><legend>Vendedores destinados <span aria-hidden="true">*</span></legend>{sellers.map((seller) => <label className="seller-option" key={seller.id}><input type="checkbox" checked={assignmentSellerIds.includes(seller.id)} onChange={(event) => setAssignmentSellerIds((current) => event.target.checked ? [...current, seller.id] : current.filter((id) => id !== seller.id))} /><span>{seller.name}<small>{seller.login}</small></span></label>)}</fieldset><button className="primary" type="submit" disabled={!assignmentSellerIds.length}>Salvar vendedores</button></form></section>}
   </>;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
-
 
 
 

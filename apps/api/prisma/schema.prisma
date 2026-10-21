@@ -65,6 +65,7 @@ model Category {
   updatedAt DateTime  @updatedAt @map("updated_at")
   products  Product[]
   balances  Balance[]
+  selectedInBalances BalanceCategory[]
 
   @@map("categories")
 }
@@ -112,6 +113,7 @@ model Balance {
   createdBy          User          @relation("BalanceCreator", fields: [createdById], references: [id])
   items              BalanceItem[]
   assignments        BalanceAssignment[]
+  selectedCategories BalanceCategory[]
   createdAt          DateTime      @default(now()) @map("created_at")
   openedAt           DateTime?     @map("opened_at")
   closedAt           DateTime?     @map("closed_at")
@@ -134,6 +136,17 @@ model BalanceAssignment {
   @@map("balance_assignments")
 }
 
+model BalanceCategory {
+  balanceId  String   @map("balance_id") @db.Uuid
+  balance    Balance  @relation(fields: [balanceId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id") @db.Uuid
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@id([balanceId, categoryId])
+  @@index([categoryId])
+  @@map("balance_categories")
+}
+
 model BalanceItem {
   id                String     @id @default(uuid()) @db.Uuid
   balanceId         String     @map("balance_id") @db.Uuid
@@ -141,6 +154,7 @@ model BalanceItem {
   productId         String     @map("product_id") @db.Uuid
   product           Product    @relation(fields: [productId], references: [id])
   referenceQuantity Decimal    @map("reference_quantity") @db.Decimal(14, 3)
+  selectedIndividually Boolean @default(true) @map("selected_individually")
   finalQuantity     Decimal?   @map("final_quantity") @db.Decimal(14, 3)
   status            ItemStatus @default(PENDENTE)
   approvedCountId   String?    @unique @map("approved_count_id") @db.Uuid

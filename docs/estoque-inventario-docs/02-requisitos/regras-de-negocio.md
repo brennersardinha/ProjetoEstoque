@@ -21,6 +21,9 @@
 Estados propostos: `RASCUNHO → ABERTO → EM_REVISAO → ENCERRADO`, com `CANCELADO` como estado terminal permitido conforme regra de transição.
 
 - **RN-11:** somente ADMIN cria e altera seleção de itens em `RASCUNHO`.
+- **RN-11a:** balanço por categorias (`CATEGORIA`) deve ter pelo menos uma categoria ativa selecionada e inclui todos os produtos ativos dessas categorias no momento da criação.
+- **RN-11b:** balanço personalizado (`PERSONALIZADO`) pode combinar categorias inteiras e produtos avulsos; a seleção persistida mantém as categorias escolhidas e os produtos dentro delas para acesso e auditoria.
+- **RN-11c:** vendedores destinados podem ser corrigidos enquanto qualquer balanço permanecer em `RASCUNHO`; depois da abertura, a destinação fica congelada.
 - **RN-12:** ao abrir, o sistema congela no item do balanço a quantidade de referência aprovada para cada produto. A fonte do saldo-base deve ser explicitamente escolhida (balanço encerrado mais recente, importação inicial, ou entrada administrativa auditada).
 - **RN-13:** uma vez aberto, não alterar a referência nem a lista de itens silenciosamente. Mudança excepcional exige operação administrativa auditada e política definida.
 - **RN-14:** contagem só é aceita para item de balanço aberto/em revisão e para usuário autenticado autorizado.

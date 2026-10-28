@@ -11,3 +11,4 @@ backups/
 .runtime/
 Estoque.exe
 release/
+.vscode/

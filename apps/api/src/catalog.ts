@@ -12,7 +12,7 @@ import { createQrToken, identifierValueSchema, normalizeIdentifier, resolveIdent
 import { requireAdmin, requireAuthentication } from "./http-auth.js";
 import { ipRateLimit } from "./rate-limit.js";
 
-const unitSchema = z.enum(["UN", "CX", "MT", "ROLO"]);
+const unitSchema = z.enum(["UN", "CX", "MT", "ROLO", "PAR"]);
 const idSchema = z.string().uuid();
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 const photoDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads/products");
@@ -56,6 +56,91 @@ export function registerCatalogRoutes(router: Router) {
       response.status(201).json(category);
     } catch (error) {
       handleDatabaseError(error, response, next);
+    }
+  });
+
+  router.patch("/categories/:id", requireAuthentication, requireAdmin, async (request, response, next) => {
+    try {
+      const categoryId = idSchema.parse(request.params.id);
+      const input = z.object({ name: z.string().trim().min(1).max(120) }).parse(request.body);
+      const existing = await prisma.category.findFirst({ where: { id: categoryId, active: true }, select: { id: true, name: true } });
+      if (!existing) {
+        response.status(404).json({ error: { code: "CATEGORY_NOT_FOUND", message: "Categoria não encontrada.", details: [] } });
+        return;
+      }
+      const category = await prisma.category.update({
+        where: { id: categoryId },
+        data: { name: input.name },
+        select: { id: true, name: true }
+      });
+      await prisma.audit.create({
+        data: {
+          userId: response.locals.user.id,
+          action: "CATEGORY_UPDATED",
+          objectType: "CATEGORY",
+          objectId: categoryId,
+          metadata: { before: existing, after: category }
+        }
+      });
+      response.json(category);
+    } catch (error) {
+      handleDatabaseError(error, response, next);
+    }
+  });
+
+  router.delete("/categories/:id", ipRateLimit(15 * 60 * 1000, 10), requireAuthentication, requireAdmin, async (request, response, next) => {
+    try {
+      const categoryId = idSchema.parse(request.params.id);
+      const { currentPassword } = z.object({ currentPassword: z.string().min(1).max(200) }).parse(request.body);
+      const actor = response.locals.user;
+      const admin = await prisma.user.findFirst({
+        where: { id: actor.id, role: "ADMIN", active: true },
+        select: { passwordHash: true }
+      });
+      if (!admin || !(await bcrypt.compare(currentPassword, admin.passwordHash))) {
+        response.status(400).json({ error: { code: "INVALID_CREDENTIALS", message: "A senha do administrador está incorreta.", details: [] } });
+        return;
+      }
+
+      await prisma.$transaction(async (transaction) => {
+        const category = await transaction.category.findFirst({
+          where: { id: categoryId, active: true },
+          select: { id: true, name: true }
+        });
+        if (!category) throw new Error("CATEGORY_NOT_FOUND");
+        const activeProduct = await transaction.product.findFirst({ where: { categoryId, active: true }, select: { id: true } });
+        if (activeProduct) throw new Error("CATEGORY_HAS_PRODUCTS");
+        const referencedBalance = await transaction.balance.findFirst({
+          where: { OR: [{ categoryId }, { selectedCategories: { some: { categoryId } } }] },
+          select: { id: true }
+        });
+        if (referencedBalance) throw new Error("CATEGORY_IN_USE");
+        await transaction.category.update({ where: { id: categoryId }, data: { active: false } });
+        await transaction.audit.create({
+          data: {
+            userId: actor.id,
+            action: "CATEGORY_DELETED",
+            objectType: "CATEGORY",
+            objectId: categoryId,
+            metadata: { name: category.name }
+          }
+        });
+      });
+      response.status(204).send();
+    } catch (error) {
+      if (error instanceof Error && error.message === "CATEGORY_NOT_FOUND") {
+        response.status(404).json({ error: { code: error.message, message: "Categoria não encontrada.", details: [] } });
+        return;
+      }
+      if (error instanceof Error && error.message === "CATEGORY_HAS_PRODUCTS") {
+        response.status(409).json({ error: { code: error.message, message: "Transfira ou exclua os produtos da categoria antes de excluí-la.", details: [] } });
+        return;
+      }
+      if (error instanceof Error && error.message === "CATEGORY_IN_USE") {
+        response.status(409).json({ error: { code: error.message, message: "A categoria está vinculada a um balanço e não pode ser excluída.", details: [] } });
+        return;
+      }
+      next(error);
     }
   });
 
@@ -125,7 +210,6 @@ export function registerCatalogRoutes(router: Router) {
     try {
       const productId = idSchema.parse(request.params.id);
       const input = z.object({
-        currentPassword: z.string().min(1).max(200),
         internalCode: z.string().trim().min(1).max(120),
         name: z.string().trim().min(1).max(200),
         unit: unitSchema,
@@ -133,15 +217,6 @@ export function registerCatalogRoutes(router: Router) {
         barcode: z.string().trim().max(255).default("")
       }).parse(request.body);
       const actor = response.locals.user;
-      const admin = await prisma.user.findFirst({
-        where: { id: actor.id, role: "ADMIN", active: true },
-        select: { passwordHash: true }
-      });
-      if (!admin || !(await bcrypt.compare(input.currentPassword, admin.passwordHash))) {
-        response.status(400).json({ error: { code: "INVALID_CREDENTIALS", message: "A senha do administrador está incorreta.", details: [] } });
-        return;
-      }
-
       const updated = await prisma.$transaction(async (transaction) => {
         const existing = await transaction.product.findFirst({
           where: { id: productId, active: true },

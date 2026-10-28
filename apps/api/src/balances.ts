@@ -8,6 +8,18 @@ const idSchema = z.string().uuid();
 const quantitySchema = z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d{1,3})?$/, "Quantidade deve ser decimal nao negativa com ate 3 casas.");
 const balanceStatusSchema = z.enum(["RASCUNHO", "ABERTO", "EM_REVISAO", "ENCERRADO", "CANCELADO"]);
 
+// Solados (unidade PAR) entram no balanço com um item por numeração da grade.
+const GRADE_UNIT = "PAR";
+const SOLE_SIZES = [34, 35, 36, 37, 38, 39, 40];
+
+type SelectedProduct = { productId: string; referenceQuantity: string; selectedIndividually: boolean };
+
+function expandSizeGrid(selection: SelectedProduct[], units: Map<string, string>) {
+  return selection.flatMap((item) => units.get(item.productId) === GRADE_UNIT
+    ? SOLE_SIZES.map((size) => ({ ...item, referenceQuantity: "0", size }))
+    : [{ ...item, size: 0 }]);
+}
+
 const productSelectionSchema = z.object({
   productId: idSchema,
   referenceQuantity: quantitySchema
@@ -115,9 +127,9 @@ export function registerBalanceRoutes(router: Router) {
           createdBy: { select: { id: true, name: true, login: true } },
           assignments: { select: { user: { select: { id: true, name: true, login: true } } } },
           items: {
-            orderBy: { product: { category: { name: "asc" } } },
+            orderBy: [{ product: { category: { name: "asc" } } }, { product: { name: "asc" } }, { size: "asc" }],
             select: {
-              id: true, referenceQuantity: true, finalQuantity: true, approvedCountId: true,
+              id: true, size: true, referenceQuantity: true, finalQuantity: true, approvedCountId: true,
               approvedAt: true, status: true,
               approvedBy: { select: { id: true, name: true, login: true } },
               product: {
@@ -149,6 +161,7 @@ export function registerBalanceRoutes(router: Router) {
         group.items.push({
           id: item.id,
           product: item.product,
+          size: item.size || null,
           referenceQuantity: item.referenceQuantity.toString(),
           finalQuantity: (item.finalQuantity ?? (balance.status === "ENCERRADO" ? item.counts[item.counts.length - 1]?.quantity ?? null : null))?.toString() ?? null,
           status: item.status,
@@ -221,7 +234,7 @@ export function registerBalanceRoutes(router: Router) {
       const selectedCategories = categoryIds.length ? await prisma.category.findMany({ where: { id: { in: categoryIds }, active: true }, select: { id: true } }) : [];
       if (selectedCategories.length !== categoryIds.length) { response.status(422).json({ error: { code: "CATEGORY_NOT_FOUND_OR_INACTIVE", message: "Todas as categorias devem existir e estar ativas.", details: [] } }); return; }
       const categoryProducts = categoryIds.length ? await prisma.product.findMany({ where: { categoryId: { in: categoryIds }, active: true }, select: { id: true } }) : [];
-      const productMap = new Map<string, { productId: string; referenceQuantity: string; selectedIndividually: boolean }>();
+      const productMap = new Map<string, SelectedProduct>();
       if (input.kind === "CATEGORIA" || categoryIds.length) for (const product of categoryProducts) productMap.set(product.id, { productId: product.id, referenceQuantity: "0", selectedIndividually: false });
       if (input.kind === "PERSONALIZADO") for (const item of input.items) productMap.set(item.productId, { ...item, selectedIndividually: true });
       const balanceItems = [...productMap.values()];
@@ -239,11 +252,12 @@ export function registerBalanceRoutes(router: Router) {
         if (sellers.length !== input.sellerIds.length) throw new Error("ASSIGNEE_NOT_ACTIVE_SELLER");
         const products = await transaction.product.findMany({
           where: { id: { in: productIds }, active: true },
-          select: { id: true }
+          select: { id: true, unit: true }
         });
         if (products.length !== productIds.length) {
           throw new Error("PRODUCT_NOT_FOUND_OR_INACTIVE");
         }
+        const units = new Map(products.map((product) => [product.id, product.unit]));
         const createdBalance = await transaction.balance.create({
           data: {
             name: input.name,
@@ -253,8 +267,9 @@ export function registerBalanceRoutes(router: Router) {
             createdById: currentUser.id,
             assignments: { create: input.sellerIds.map((userId) => ({ userId })) },
             items: {
-              create: balanceItems.map((item) => ({
+              create: expandSizeGrid(balanceItems, units).map((item) => ({
                 productId: item.productId,
+                size: item.size,
                 referenceQuantity: new Prisma.Decimal(item.referenceQuantity),
                 selectedIndividually: item.selectedIndividually
               }))
@@ -301,7 +316,7 @@ export function registerBalanceRoutes(router: Router) {
         select: { id: true, name: true, kind: true, categoryId: true, status: true,
           assignments: { select: { userId: true } },
           selectedCategories: { select: { categoryId: true } },
-          items: { where: { selectedIndividually: true }, select: { productId: true, referenceQuantity: true } } }
+          items: { where: { selectedIndividually: true }, distinct: ["productId"], select: { productId: true, referenceQuantity: true } } }
       });
       if (!balance) { response.status(404).json({ error: { code: "BALANCE_NOT_FOUND", message: "Balanço não encontrado.", details: [] } }); return; }
       if (balance.kind !== "PERSONALIZADO" || balance.status !== "RASCUNHO") {
@@ -327,20 +342,21 @@ export function registerBalanceRoutes(router: Router) {
         if (balance.kind !== "PERSONALIZADO" || balance.status !== "RASCUNHO") throw new Error("CUSTOM_DRAFT_ONLY");
         const [sellers, products, categories] = await Promise.all([
           transaction.user.findMany({ where: { id: { in: input.sellerIds }, role: "VENDEDOR", active: true }, select: { id: true } }),
-          transaction.product.findMany({ where: { id: { in: input.items.map((item) => item.productId) }, active: true }, select: { id: true } }),
+          transaction.product.findMany({ where: { id: { in: input.items.map((item) => item.productId) }, active: true }, select: { id: true, unit: true } }),
           transaction.category.findMany({ where: { id: { in: input.categoryIds }, active: true }, select: { id: true } })
         ]);
         if (sellers.length !== input.sellerIds.length) throw new Error("ASSIGNEE_NOT_ACTIVE_SELLER");
         if (products.length !== input.items.length) throw new Error("PRODUCT_NOT_FOUND_OR_INACTIVE");
         if (categories.length !== input.categoryIds.length) throw new Error("CATEGORY_NOT_FOUND_OR_INACTIVE");
-        const categoryProducts = input.categoryIds.length ? await transaction.product.findMany({ where: { categoryId: { in: input.categoryIds }, active: true }, select: { id: true } }) : [];
-        const productMap = new Map<string, { productId: string; referenceQuantity: string; selectedIndividually: boolean }>();
+        const categoryProducts = input.categoryIds.length ? await transaction.product.findMany({ where: { categoryId: { in: input.categoryIds }, active: true }, select: { id: true, unit: true } }) : [];
+        const productMap = new Map<string, SelectedProduct>();
         for (const product of categoryProducts) productMap.set(product.id, { productId: product.id, referenceQuantity: "0", selectedIndividually: false });
         for (const item of input.items) productMap.set(item.productId, { ...item, selectedIndividually: true });
         if (!productMap.size) throw new Error("CATEGORY_EMPTY");
         await transaction.balance.update({ where: { id: balanceId }, data: { name: input.name } });
         await transaction.balanceItem.deleteMany({ where: { balanceId } });
-        await transaction.balanceItem.createMany({ data: [...productMap.values()].map((item) => ({ balanceId, productId: item.productId, referenceQuantity: new Prisma.Decimal(item.referenceQuantity), selectedIndividually: item.selectedIndividually })) });
+        const units = new Map([...products, ...categoryProducts].map((product) => [product.id, product.unit]));
+        await transaction.balanceItem.createMany({ data: expandSizeGrid([...productMap.values()], units).map((item) => ({ balanceId, productId: item.productId, size: item.size, referenceQuantity: new Prisma.Decimal(item.referenceQuantity), selectedIndividually: item.selectedIndividually })) });
         await transaction.balanceCategory.deleteMany({ where: { balanceId } });
         if (input.categoryIds.length) await transaction.balanceCategory.createMany({ data: input.categoryIds.map((categoryId) => ({ balanceId, categoryId })) });
         await transaction.balanceAssignment.deleteMany({ where: { balanceId } });
@@ -493,9 +509,10 @@ export function registerBalanceRoutes(router: Router) {
           ...(status ? { status } : {}),
           balance: { status: { in: ["ABERTO", "EM_REVISAO"] } }
         },
-        orderBy: { product: { name: "asc" } },
+        orderBy: [{ product: { name: "asc" } }, { size: "asc" }],
         select: {
           id: true,
+          size: true,
           referenceQuantity: true,
           status: true,
           product: {
@@ -514,6 +531,7 @@ export function registerBalanceRoutes(router: Router) {
       response.json({
         data: items.map((item) => ({
           id: item.id,
+          size: item.size || null,
           referenceQuantity: item.referenceQuantity.toString(),
           status: item.status,
           product: item.product,

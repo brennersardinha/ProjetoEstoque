@@ -11,6 +11,31 @@ Invoke-RestMethod http://localhost:3000/api/health
 
 O container da API aplica as migrações Prisma automaticamente.
 
+No catálogo, administradores podem editar categorias e produtos sem informar a senha novamente durante a sessão autenticada. A exclusão de categorias e produtos continua exigindo a senha do administrador. Uma categoria só pode ser excluída quando não possui produtos ativos nem vínculos com balanços; nesse caso, a API informa o vínculo que precisa ser resolvido.
+
+## Solados com grade de numeração
+
+Produtos com unidade `PAR` são solados contados por numeração, do 34 ao 40. Cadastre cada referência uma única vez (no painel ou pela importação de planilha, informando `PAR` na coluna de unidade); ela recebe um único QR Code. Ao criar um balanço, cada referência em `PAR` gera um item por numeração, sem saldo de referência. No aplicativo, a leitura do QR abre a grade da referência para informar a quantidade de pares de cada numeração; o detalhe e o relatório impresso do balanço mostram a grade com o total de pares por referência.
+
+As portas publicadas podem ser alteradas no `.env` sem mudar as portas internas dos containers:
+
+```dotenv
+API_PORT=3000
+POSTGRES_PORT=5433
+```
+
+Se uma porta estiver ocupada, descubra o processo responsável antes de trocar a configuração:
+
+```powershell
+Get-NetTCPConnection -LocalPort 3000 -State Listen |
+  Select-Object LocalAddress,LocalPort,OwningProcess
+Get-Process -Id <PID>
+docker compose ps
+docker compose logs --tail=100 api
+```
+
+Não use uma porta diferente apenas no Docker sem atualizar também `VITE_API_URL` no build do painel e `EXPO_PUBLIC_API_PORT` no build do aplicativo mobile. O aplicativo descobre o IP do computador sozinho na rede Wi-Fi; não é necessário fixar IP no build.
+
 Para o uso diário no Windows, dê duplo clique em `Iniciar Estoque.cmd` na raiz do projeto. Ele verifica o Docker, sobe os serviços, valida o health check da API, inicia o painel web e abre o navegador. Use `Parar Estoque.cmd` para parar os serviços sem apagar o volume do PostgreSQL.
 
 Para cadastrar um vendedor no servidor local, execute na raiz do projeto:

@@ -28,6 +28,8 @@ Para subir o backend e o banco juntos em container, copie `.env.example` para `.
 
 Para executar o painel web em desenvolvimento, em outro terminal use `npm --workspace apps/web run dev`. Ele ficará disponível em `http://localhost:5173` e consumirá a API em `http://localhost:3000/api`. Para apontar para outro endereço, defina `VITE_API_URL`.
 
+Se a porta `3000` estiver ocupada, defina `API_PORT` no `.env` e gere novamente o painel com `VITE_API_URL` apontando para essa porta. Para mudar a porta do painel servido pelo inicializador, defina também `WEB_PORT`.
+
 ## Uso diário no Windows
 
 Depois da instalação inicial, não é necessário abrir o projeto nem executar comandos manualmente. Dê duplo clique em `Iniciar Estoque.cmd` na raiz do projeto. O inicializador sobe o PostgreSQL e a API no Docker, inicia o painel web e abre `http://localhost:5173` no navegador. Para encerrar, use `Parar Estoque.cmd`; os dados do banco são preservados.
@@ -56,4 +58,4 @@ O banco não deve ser exposto à internet. Antes do piloto, ainda é necessário
 
 ## Aplicativo desktop instalável
 
-Para gerar o instalador Windows do painel e servidor, execute `npm run build:desktop`. O arquivo será criado em `release/Estoque Setup 0.3.4.exe`. O instalador cria atalhos no Menu Iniciar e na Área de Trabalho e abre o painel em uma janela própria do aplicativo. O Docker Desktop continua sendo necessário para executar o banco e a API localmente.
+Para gerar o instalador Windows do painel e servidor, execute `npm run build:desktop`. O arquivo será criado em `release/Estoque Setup 0.3.5.exe`. O instalador cria atalhos no Menu Iniciar e na Área de Trabalho e abre o painel em uma janela própria do aplicativo. O Docker Desktop continua sendo necessário para executar o banco e a API localmente.

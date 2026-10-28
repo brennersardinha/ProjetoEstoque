@@ -22,7 +22,7 @@ const mappingSchema = z.object({
   barcode: z.string().optional()
 });
 
-const units = new Set(["UN", "CX", "MT", "ROLO"]);
+const units = new Set(["UN", "CX", "MT", "ROLO", "PAR"]);
 type ImportRow = {
   line: number;
   internalCode: string;

@@ -8,8 +8,8 @@ type Product = { id: string; internalCode: string; name: string; unit: string; p
 type Category = { id: string; name: string };
 type Balance = { id: string; name: string; kind: "CATEGORIA" | "PERSONALIZADO"; categoryId?: string | null; selectedCategories?: Category[]; status: string; itemCount: number; myCountedItemCount: number; createdAt?: string; openedAt?: string | null; closedAt?: string | null; cancelledAt?: string | null; cancellationReason?: string | null; createdBy?: { id: string; name: string; login: string }; assignedSellers?: { id: string; name: string; login: string; active: boolean }[] };
 type BalanceCount = { id: string; quantity: string; countedAt: string; countedBy: { id: string; name: string }; observation: string | null; isRecount: boolean };
-type BalanceDetailItem = { id: string; referenceQuantity: string; status: string; product: Product; counts: BalanceCount[] };
-type BalanceReportItem = { id: string; product: Product; referenceQuantity: string; finalQuantity: string | null; status: string; approvedAt: string | null; approvedBy: { id: string; name: string; login: string } | null; counts: (BalanceCount & { countedBy: { id: string; name: string; login: string }; approved: boolean })[] };
+type BalanceDetailItem = { id: string; size?: number | null; referenceQuantity: string; status: string; product: Product; counts: BalanceCount[] };
+type BalanceReportItem = { id: string; product: Product; size?: number | null; referenceQuantity: string; finalQuantity: string | null; status: string; approvedAt: string | null; approvedBy: { id: string; name: string; login: string } | null; counts: (BalanceCount & { countedBy: { id: string; name: string; login: string }; approved: boolean })[] };
 type BalanceReport = { generatedAt: string; balance: { id: string; name: string; kind: "CATEGORIA" | "PERSONALIZADO"; categoryId: string | null; selectedCategories: Category[]; status: string; createdAt: string; openedAt: string | null; closedAt: string | null; cancelledAt: string | null; cancellationReason: string | null; createdBy: { id: string; name: string; login: string }; assignedSellers: { id: string; name: string; login: string }[]; itemCount: number }; categories: { id: string; name: string; items: BalanceReportItem[] }[] };
 type BalanceDetailView = { balance: Balance; report?: BalanceReport; items?: BalanceDetailItem[] };
 type ManagedUser = { id: string; name: string; login: string; role: "ADMIN" | "VENDEDOR"; active: boolean; createdAt: string; updatedAt: string };
@@ -165,11 +165,14 @@ function Products({ token }: { token: string }) {
   const [loading, setLoading] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editDraft, setEditDraft] = useState({ internalCode: "", name: "", unit: "UN", categoryId: "", barcode: "" });
-  const [editPassword, setEditPassword] = useState("");
   const [editPhoto, setEditPhoto] = useState<File | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [categoryDraft, setCategoryDraft] = useState("");
+  const [deleteCategoryTarget, setDeleteCategoryTarget] = useState<Category | null>(null);
+  const [deleteCategoryPassword, setDeleteCategoryPassword] = useState("");
   const [productActionPending, setProductActionPending] = useState(false);
   const load = async () => {
     setLoading(true);
@@ -242,14 +245,12 @@ function Products({ token }: { token: string }) {
       categoryId: product.category.id,
       barcode: product.identifiers?.find((identifier) => identifier.type === "BARCODE")?.normalizedValue ?? ""
     });
-    setEditPassword("");
     setEditPhoto(null);
     setError("");
   }
   function closeEditProduct() {
     if (productActionPending) return;
     setEditingProduct(null);
-    setEditPassword("");
     setEditPhoto(null);
   }
   async function saveProduct(event: FormEvent) {
@@ -262,7 +263,7 @@ function Products({ token }: { token: string }) {
     try {
       await api<Product>(`/products/${editingProduct.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ ...editDraft, currentPassword: editPassword })
+        body: JSON.stringify(editDraft)
       }, token);
       if (editPhoto) {
         const photo = new FormData();
@@ -271,7 +272,6 @@ function Products({ token }: { token: string }) {
         catch (reason) { photoUploadError = reason instanceof Error ? reason.message : "Falha ao enviar a foto."; }
       }
       setEditingProduct(null);
-      setEditPassword("");
       setEditPhoto(null);
       await load();
       setMessage(photoUploadError
@@ -279,6 +279,48 @@ function Products({ token }: { token: string }) {
         : "Produto atualizado com sucesso.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Falha ao atualizar o produto.");
+    } finally { setProductActionPending(false); }
+  }
+  function beginEditCategory(category: Category) {
+    setEditingCategory(category);
+    setCategoryDraft(category.name);
+    setError("");
+  }
+  async function saveCategory(event: FormEvent) {
+    event.preventDefault();
+    if (!editingCategory || productActionPending) return;
+    setProductActionPending(true);
+    setError("");
+    setMessage("");
+    try {
+      await api<Category>(`/categories/${editingCategory.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: categoryDraft })
+      }, token);
+      setEditingCategory(null);
+      await load();
+      setMessage("Categoria atualizada com sucesso.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha ao atualizar a categoria.");
+    } finally { setProductActionPending(false); }
+  }
+  async function deleteCategory(event: FormEvent) {
+    event.preventDefault();
+    if (!deleteCategoryTarget || productActionPending) return;
+    setProductActionPending(true);
+    setError("");
+    setMessage("");
+    try {
+      await api(`/categories/${deleteCategoryTarget.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ currentPassword: deleteCategoryPassword })
+      }, token);
+      setDeleteCategoryTarget(null);
+      setDeleteCategoryPassword("");
+      await load();
+      setMessage("Categoria excluída com sucesso.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Falha ao excluir a categoria.");
     } finally { setProductActionPending(false); }
   }
   async function deleteProduct(event: FormEvent) {
@@ -343,7 +385,7 @@ function Products({ token }: { token: string }) {
     <section className="card"><div className="card-heading"><div><h2>Cadastrar produto</h2><p>Inclua produtos manualmente ou importe vários de uma vez.</p></div><button type="button" onClick={() => setShowImport((open) => !open)}>{showImport ? "Fechar importação" : "Importar catálogo"}</button></div><form className="product-form" onSubmit={createProduct}>
       <label>Código interno<input value={internalCode} onChange={(event) => setInternalCode(event.target.value)} required maxLength={120} /></label>
       <label>Nome do produto<input value={productName} onChange={(event) => setProductName(event.target.value)} required maxLength={200} /></label>
-      <label>Unidade<select value={unit} onChange={(event) => setUnit(event.target.value)}><option value="UN">UN</option><option value="CX">CX</option><option value="MT">MT</option><option value="ROLO">ROLO</option></select></label>
+      <label>Unidade<select value={unit} onChange={(event) => setUnit(event.target.value)}><option value="UN">UN</option><option value="CX">CX</option><option value="MT">MT</option><option value="ROLO">ROLO</option><option value="PAR">PAR (solado 34–40)</option></select></label>
       <label>Categoria<select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} required><option value="">Selecione...</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
       <label>Código de barras (opcional)<input value={barcode} onChange={(event) => setBarcode(event.target.value)} maxLength={120} /></label>
       <label>Foto do produto (opcional)<input key={photoFile ? "photo-selected" : "photo-empty"} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setPhotoFile(event.target.files?.[0] ?? null)} /><small>{photoFile ? photoFile.name : "JPEG, PNG ou WebP · até 5 MB"}</small></label>
@@ -353,17 +395,25 @@ function Products({ token }: { token: string }) {
     <section className="card"><div className="card-heading"><div><h2>Catálogo por categoria</h2><p>{products.length} produtos em {categories.length} pastas</p></div><span className="badge">{categories.length} categorias</span></div><div className="catalog-toolbar"><button disabled={selectedLabels.length === 0 || loading} onClick={() => void printProducts(products.filter((product) => selectedLabels.includes(product.id)), "Etiquetas QR selecionadas")}>Imprimir selecionados ({selectedLabels.length})</button><button onClick={() => void load()} disabled={loading}>{loading ? "Atualizando…" : "Atualizar catálogo"}</button></div>{loading && products.length === 0 ? <div className="empty" role="status">Carregando pastas do catálogo…</div> : categories.map((category) => {
       const categoryProducts = products.filter((product) => product.category.id === category.id);
       const expanded = openCategory === category.id;
-      return <section className={`category-folder ${expanded ? "is-open" : ""}`} key={category.id}><div className="folder-heading"><button className="folder-toggle" aria-expanded={expanded} onClick={() => setOpenCategory(expanded ? null : category.id)}><span className="folder-icon" aria-hidden="true">{expanded ? "▾" : "▸"}</span><span className="folder-name">{category.name}</span><span className="badge">{categoryProducts.length} produtos</span></button><button disabled={!categoryProducts.length || loading} onClick={() => void printCategory(category, categoryProducts)}>Imprimir QR da categoria</button></div>{expanded && <div className="table-wrap"><table><thead><tr><th>QR</th><th>Código interno</th><th>Produto</th><th>Unidade</th><th>Ações</th></tr></thead><tbody>{categoryProducts.map((product) => <tr key={product.id}><td><input type="checkbox" aria-label={`Selecionar etiqueta de ${product.name}`} checked={selectedLabels.includes(product.id)} onChange={(event) => setSelectedLabels((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /></td><td className="code">{product.internalCode}</td><td>{product.name}</td><td><span className="unit">{product.unit}</span></td><td><div className="product-actions"><button disabled={productActionPending} onClick={() => beginEditProduct(product)}>Editar</button><button disabled={productActionPending} className="danger-solid" onClick={() => { setDeleteTarget(product); setDeletePassword(""); setDeleteConfirmation(""); setError(""); }}>Excluir</button><button onClick={() => void printQrLabel(product)}>Imprimir QR</button><button onClick={() => void regenerateQr(product)}>Regenerar QR</button></div></td></tr>)}</tbody></table>{categoryProducts.length === 0 && <div className="empty">Esta pasta ainda não tem produtos.</div>}</div>}</section>;
+      return <section className={`category-folder ${expanded ? "is-open" : ""}`} key={category.id}><div className="folder-heading"><button className="folder-toggle" aria-expanded={expanded} onClick={() => setOpenCategory(expanded ? null : category.id)}><span className="folder-icon" aria-hidden="true">{expanded ? "▾" : "▸"}</span><span className="folder-name">{category.name}</span><span className="badge">{categoryProducts.length} produtos</span></button><div className="product-actions"><button disabled={productActionPending} onClick={() => beginEditCategory(category)}>Editar categoria</button><button disabled={productActionPending} className="danger-solid" onClick={() => { setDeleteCategoryTarget(category); setDeleteCategoryPassword(""); setError(""); }}>Excluir categoria</button><button disabled={!categoryProducts.length || loading} onClick={() => void printCategory(category, categoryProducts)}>Imprimir QR da categoria</button></div></div>{expanded && <div className="table-wrap"><table><thead><tr><th>QR</th><th>Código interno</th><th>Produto</th><th>Unidade</th><th>Ações</th></tr></thead><tbody>{categoryProducts.map((product) => <tr key={product.id}><td><input type="checkbox" aria-label={`Selecionar etiqueta de ${product.name}`} checked={selectedLabels.includes(product.id)} onChange={(event) => setSelectedLabels((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} /></td><td className="code">{product.internalCode}</td><td>{product.name}</td><td><span className="unit">{product.unit}</span></td><td><div className="product-actions"><button disabled={productActionPending} onClick={() => beginEditProduct(product)}>Editar</button><button disabled={productActionPending} className="danger-solid" onClick={() => { setDeleteTarget(product); setDeletePassword(""); setDeleteConfirmation(""); setError(""); }}>Excluir</button><button onClick={() => void printQrLabel(product)}>Imprimir QR</button><button onClick={() => void regenerateQr(product)}>Regenerar QR</button></div></td></tr>)}</tbody></table>{categoryProducts.length === 0 && <div className="empty">Esta pasta ainda não tem produtos.</div>}</div>}</section>;
     })}{!loading && categories.length === 0 && <div className="empty">Nenhuma categoria cadastrada.</div>}</section>
     {editingProduct && <Modal title={`Editar produto · ${editingProduct.name}`} onClose={closeEditProduct}><form className="dialog-form" onSubmit={saveProduct}>
       <label>Código interno<input value={editDraft.internalCode} onChange={(event) => setEditDraft({ ...editDraft, internalCode: event.target.value })} maxLength={120} required /></label>
       <label>Nome do produto<input value={editDraft.name} onChange={(event) => setEditDraft({ ...editDraft, name: event.target.value })} maxLength={200} required /></label>
-      <label>Unidade<select value={editDraft.unit} onChange={(event) => setEditDraft({ ...editDraft, unit: event.target.value })}><option value="UN">UN</option><option value="CX">CX</option><option value="MT">MT</option><option value="ROLO">ROLO</option></select></label>
+      <label>Unidade<select value={editDraft.unit} onChange={(event) => setEditDraft({ ...editDraft, unit: event.target.value })}><option value="UN">UN</option><option value="CX">CX</option><option value="MT">MT</option><option value="ROLO">ROLO</option><option value="PAR">PAR (solado 34–40)</option></select></label>
       <label>Categoria<select value={editDraft.categoryId} onChange={(event) => setEditDraft({ ...editDraft, categoryId: event.target.value })} required>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <label>Código de barras<input value={editDraft.barcode} onChange={(event) => setEditDraft({ ...editDraft, barcode: event.target.value })} maxLength={255} /><small>Deixe vazio para remover o código de barras atual.</small></label>
       <label>Trocar foto do produto<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEditPhoto(event.target.files?.[0] ?? null)} /><small>{editPhoto ? editPhoto.name : editingProduct.photoUrl ? "Selecione uma foto para substituir a atual." : "Sem foto cadastrada. JPEG, PNG ou WebP · até 5 MB."}</small></label>
-      <label>Senha do administrador<input type="password" value={editPassword} onChange={(event) => setEditPassword(event.target.value)} autoComplete="current-password" required /></label>
       {error && <div className="error" role="alert">{error}</div>}<div className="dialog-actions"><button type="button" disabled={productActionPending} onClick={closeEditProduct}>Cancelar</button><button className="primary" disabled={productActionPending}>{productActionPending ? "Salvando…" : "Salvar alterações"}</button></div>
+    </form></Modal>}
+    {editingCategory && <Modal title={`Editar categoria · ${editingCategory.name}`} onClose={() => !productActionPending && setEditingCategory(null)}><form className="dialog-form" onSubmit={saveCategory}>
+      <label>Nome da categoria<input value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} maxLength={120} required /></label>
+      {error && <div className="error" role="alert">{error}</div>}<div className="dialog-actions"><button type="button" disabled={productActionPending} onClick={() => setEditingCategory(null)}>Cancelar</button><button className="primary" disabled={productActionPending}>{productActionPending ? "Salvando…" : "Salvar alterações"}</button></div>
+    </form></Modal>}
+    {deleteCategoryTarget && <Modal title={`Excluir categoria · ${deleteCategoryTarget.name}`} onClose={() => !productActionPending && setDeleteCategoryTarget(null)}><form className="dialog-form" onSubmit={deleteCategory}>
+      <p>A categoria só poderá ser excluída se não possuir produtos nem estiver vinculada a balanços.</p>
+      <label>Senha do administrador<input type="password" value={deleteCategoryPassword} onChange={(event) => setDeleteCategoryPassword(event.target.value)} autoComplete="current-password" required /></label>
+      {error && <div className="error" role="alert">{error}</div>}<div className="dialog-actions"><button type="button" disabled={productActionPending} onClick={() => setDeleteCategoryTarget(null)}>Cancelar</button><button className="danger-solid" disabled={productActionPending}>{productActionPending ? "Excluindo…" : "Excluir categoria"}</button></div>
     </form></Modal>}
     {deleteTarget && <Modal title={`Excluir produto · ${deleteTarget.name}`} onClose={() => { if (!productActionPending) { setDeleteTarget(null); setDeletePassword(""); setDeleteConfirmation(""); } }}><form className="dialog-form" onSubmit={deleteProduct}>
       <p>O produto será retirado do catálogo e seus QR Codes serão desativados. Balanços e relatórios anteriores serão preservados.</p>
@@ -372,6 +422,12 @@ function Products({ token }: { token: string }) {
       {error && <div className="error" role="alert">{error}</div>}<div className="dialog-actions"><button type="button" disabled={productActionPending} onClick={() => { setDeleteTarget(null); setDeletePassword(""); setDeleteConfirmation(""); }}>Cancelar</button><button className="danger-solid" disabled={productActionPending}>{productActionPending ? "Excluindo…" : "Excluir produto"}</button></div>
     </form></Modal>}
     </>;
+}
+
+function sizeGridHtml(items: BalanceReportItem[]) {
+  const rows = sizeGridRows(items);
+  if (!rows.length) return "";
+  return `<table class="grid-table"><thead><tr><th>Referência (pares)</th>${SOLE_SIZES.map((size) => `<th>${size}</th>`).join("")}<th>Total</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${escapeHtml(row.product.name)}<div class=code>${escapeHtml(row.product.internalCode)}</div></td>${SOLE_SIZES.map((size) => `<td>${escapeHtml(row.quantities[size] ?? "—")}</td>`).join("")}<td><b>${row.total}</b></td></tr>`).join("")}</tbody></table>`;
 }
 
 function escapeHtml(value: string) {
@@ -438,6 +494,26 @@ function ImportProducts({ token, onImported }: { token: string; onImported?: () 
     {error && <div className="error">{error}</div>}{message && <div className="success">{message}</div>}{preview && <section className="card"><div className="card-heading"><div><span className="eyebrow">ETAPA 2</span><h2>Revisar prévia</h2></div><div className="preview-stats"><strong>{preview.valid}</strong> válidas <strong className={preview.invalid ? "danger-text" : ""}>{preview.invalid}</strong> com erro</div></div><div className="table-wrap"><table><thead><tr><th>Linha</th><th>Código</th><th>Erros</th></tr></thead><tbody>{preview.rows.map((row) => <tr key={row.line}><td>{row.line}</td><td className="code">{row.internalCode}</td><td>{row.errors.length ? <span className="danger-text">{row.errors.join(", ")}</span> : <span className="success-text">OK</span>}</td></tr>)}</tbody></table></div>{preview.invalid === 0 && <button className="primary" onClick={() => void confirm()}>Confirmar importação</button>}</section>}</>;
 }
 
+const SOLE_SIZES = [34, 35, 36, 37, 38, 39, 40];
+function itemName(item: { product: Product; size?: number | null }) { return item.size ? `${item.product.name} · Nº ${item.size}` : item.product.name; }
+// Agrupa os itens de solados por referência, com a quantidade aprovada (ou última contagem) de cada numeração.
+function sizeGridRows(items: BalanceReportItem[]) {
+  const rows = new Map<string, { product: Product; quantities: Record<number, string> }>();
+  for (const item of items) {
+    if (!item.size) continue;
+    const row = rows.get(item.product.id) ?? { product: item.product, quantities: {} };
+    const quantity = item.finalQuantity ?? item.counts[item.counts.length - 1]?.quantity;
+    if (quantity !== undefined) row.quantities[item.size] = quantity;
+    rows.set(item.product.id, row);
+  }
+  return [...rows.values()].map((row) => ({ ...row, total: Object.values(row.quantities).reduce((sum, quantity) => sum + Number(quantity), 0) }));
+}
+function SizeGridTable({ items }: { items: BalanceReportItem[] }) {
+  const rows = sizeGridRows(items);
+  if (!rows.length) return null;
+  return <div className="table-wrap"><table><thead><tr><th>Referência (pares)</th>{SOLE_SIZES.map((size) => <th key={size}>{size}</th>)}<th>Total</th></tr></thead><tbody>{rows.map((row) => <tr key={row.product.id}><td>{row.product.name}<small className="block">{row.product.internalCode}</small></td>{SOLE_SIZES.map((size) => <td key={size}>{row.quantities[size] ?? "—"}</td>)}<td><b>{row.total}</b></td></tr>)}</tbody></table></div>;
+}
+
 function BalanceDetailsScreen({ detail, categories, isAdmin, onBack, onOpen, onEdit, onDelete, onAssign, onFinalize, onPrint }: {
   detail: BalanceDetailView;
   categories: Category[];
@@ -476,14 +552,15 @@ function BalanceDetailsScreen({ detail, categories, isAdmin, onBack, onOpen, onE
     </div>
     {report ? report.categories.length ? report.categories.map((category) => <div className="detail-category" key={category.id}>
       <h3>{category.name} <small>({category.items.length} itens)</small></h3>
+      <SizeGridTable items={category.items} />
       <div className="table-wrap"><table><thead><tr><th>Código</th><th>Produto</th><th>Referência</th><th>Contagens</th><th>Responsável</th><th>Final</th><th>Estado</th></tr></thead><tbody>{category.items.map((item) => <tr key={item.id}>
-        <td className="code">{item.product.internalCode}</td><td>{item.product.name}</td><td>{item.referenceQuantity}</td>
+        <td className="code">{item.product.internalCode}</td><td>{itemName(item)}</td><td>{item.referenceQuantity}</td>
         <td>{item.counts.length ? item.counts.map((count) => <div className="detail-count" key={count.id}><b>{count.quantity} {item.product.unit}</b> · {formatDate(count.countedAt)}{count.isRecount ? " · recontagem" : ""}</div>) : <span className="muted">Sem contagem</span>}</td>
         <td>{item.counts.length ? item.counts.map((count) => <div className="detail-count" key={count.id}>{count.countedBy.login}</div>) : "—"}</td>
         <td>{item.finalQuantity ?? "—"}</td><td><span className="status">{item.status}</span></td>
       </tr>)}</tbody></table></div>
     </div>) : <div className="empty">Este balanço ainda não possui itens.</div> : <div className="table-wrap"><table><thead><tr><th>Produto</th><th>Referência</th><th>Responsável</th><th>Quantidade</th><th>Data/hora</th><th>Estado</th></tr></thead><tbody>{detail.items?.map((item) => <tr key={item.id}>
-      <td>{item.product.name}<small className="block">{item.product.internalCode}</small></td><td>{item.referenceQuantity}</td>
+      <td>{itemName(item)}<small className="block">{item.product.internalCode}</small></td><td>{item.referenceQuantity}</td>
       <td>{item.counts[0]?.countedBy.name ?? "—"}</td><td>{item.counts[0] ? `${item.counts[0].quantity} ${item.product.unit}` : "—"}</td>
       <td>{item.counts[0] ? formatDate(item.counts[0].countedAt) : "—"}</td><td><span className="status">{item.status}</span>{item.counts[0]?.isRecount ? " · recontagem" : ""}</td>
     </tr>)}</tbody></table></div>}
@@ -635,10 +712,10 @@ function Balances({ token, user }: { token: string; user: User }) {
     setError("");
     try {
       const report = await api<BalanceReport>(`/balances/${balance.id}/report`, {}, token);
-      const categorySections = report.categories.map((category) => `<section class="category"><h2>${escapeHtml(category.name)} <small>(${category.items.length} itens)</small></h2><table class="report-table"><thead><tr><th>Código</th><th>Produto</th><th>Referência</th><th>Contagens</th><th>Responsável</th><th>Final</th><th>Estado</th></tr></thead><tbody>${category.items.map((item) => {
+      const categorySections = report.categories.map((category) => `<section class="category"><h2>${escapeHtml(category.name)} <small>(${category.items.length} itens)</small></h2>${sizeGridHtml(category.items)}<table class="report-table"><thead><tr><th>Código</th><th>Produto</th><th>Referência</th><th>Contagens</th><th>Responsável</th><th>Final</th><th>Estado</th></tr></thead><tbody>${category.items.map((item) => {
         const counts = item.counts.length ? item.counts.map((count) => `<div class="count ${count.approved ? "approved" : ""}"><b>${escapeHtml(count.quantity)} ${escapeHtml(item.product.unit)}</b> · ${escapeHtml(formatDate(count.countedAt))}${count.isRecount ? " · recontagem" : ""}${count.approved ? " · aprovada" : ""}</div>`).join("") : "<span class=muted>Sem contagem</span>";
         const responsibles = `${item.counts.length ? item.counts.map((count) => `<div class="count ${count.approved ? "approved" : ""}">${escapeHtml(count.countedBy.login)}</div>`).join("") : "<span class=muted>—</span>"}${item.approvedBy ? `<div class="count approved">Aprovação: ${escapeHtml(item.approvedBy.login)}${item.approvedAt ? ` · ${escapeHtml(formatDate(item.approvedAt))}` : ""}</div>` : ""}`;
-        return `<tr><td class=code>${escapeHtml(item.product.internalCode)}</td><td>${escapeHtml(item.product.name)}</td><td>${escapeHtml(item.referenceQuantity)}</td><td>${counts}</td><td>${responsibles}</td><td>${escapeHtml(item.finalQuantity ?? "—")}</td><td>${escapeHtml(item.status)}</td></tr>`;
+        return `<tr><td class=code>${escapeHtml(item.product.internalCode)}</td><td>${escapeHtml(itemName(item))}</td><td>${escapeHtml(item.referenceQuantity)}</td><td>${counts}</td><td>${responsibles}</td><td>${escapeHtml(item.finalQuantity ?? "—")}</td><td>${escapeHtml(item.status)}</td></tr>`;
       }).join("")}</tbody></table></section>`).join("");
       const dateValues: [string, string][] = [
         ["Criado em", formatDate(report.balance.createdAt)],
@@ -650,7 +727,7 @@ function Balances({ token, user }: { token: string; user: User }) {
       const logoUrl = `${window.location.origin}/brand/atacadista-silva.svg`;
       const page = window.open("", "_blank", "width=1200,height=850");
       if (!page) throw new Error("Permita janelas pop-up para imprimir o relatório.");
-      page.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Relatório · ${escapeHtml(report.balance.name)}</title><style>@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{font:8pt Arial,sans-serif;color:#17231f;margin:0}.report-header{border-bottom:1.5px solid #176b4d;padding-bottom:3mm;margin-bottom:4mm}.brand{display:flex;align-items:center;gap:8px;margin-bottom:3mm}.brand img{width:105px;height:auto;flex:0 0 auto}.brand small{margin-left:auto;color:#58685f;font-size:7pt}.title-row{display:flex;justify-content:space-between;align-items:start;gap:10px}.title-row h1{font-size:14pt;margin:0 0 2px}.meta-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 10px;margin-top:6px}.meta-grid div{display:grid;gap:2px;overflow-wrap:anywhere}.meta-grid b{font-size:6.5pt;text-transform:uppercase;color:#53645b;letter-spacing:.03em}.summary{margin-top:6px}.category{margin-top:4mm;break-inside:auto}.category h2{font-size:9pt;background:#eaf5ee;padding:4px 6px;margin:0}.category h2 small{font-size:7pt;font-weight:400;color:#53645b}table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:6.5pt}table.report-table th:nth-child(1){width:10%}table.report-table th:nth-child(2){width:21%}table.report-table th:nth-child(3){width:9%}table.report-table th:nth-child(4){width:24%}table.report-table th:nth-child(5){width:15%}table.report-table th:nth-child(6){width:9%}table.report-table th:nth-child(7){width:12%}thead{display:table-header-group}th{text-align:left;text-transform:uppercase;font-size:6pt;color:#46574d;background:#f4f6f4}td,th{border:1px solid #d8e0dc;padding:3px;vertical-align:top;overflow-wrap:anywhere}tr{break-inside:avoid}.code{font-family:monospace;white-space:normal;overflow-wrap:anywhere}.count{margin:0 0 2px}.approved{color:#176b4d}.muted{color:#7a8680}.empty{text-align:center;padding:10px;color:#7a8680}@media print{.category h2{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><header class="report-header"><div class="brand"><img src="${logoUrl}" alt="Atacadista Silva"><div class="title-row"><div><h1>Relatório do balanço</h1><strong>${escapeHtml(report.balance.name)}</strong></div><span><b>Status:</b> ${escapeHtml(report.balance.status)}</span></div><small>Gerado em ${escapeHtml(formatDate(report.generatedAt))}</small></div><div class="meta-grid"><div><b>Identificador</b><span>${escapeHtml(report.balance.id)}</span></div><div><b>Responsável pela criação</b><span>${escapeHtml(report.balance.createdBy.name)} (${escapeHtml(report.balance.createdBy.login)})</span></div><div><b>Vendedores destinados</b><span>${escapeHtml(report.balance.assignedSellers.map((seller) => seller.name).join(", ") || "—")}</span></div>${dates}<div><b>Total de itens</b><span>${report.balance.itemCount}</span></div>${report.balance.cancellationReason ? `<div><b>Motivo do cancelamento</b><span>${escapeHtml(report.balance.cancellationReason)}</span></div>` : ""}</div></header>${categorySections || "<div class=empty>Este balanço não possui itens.</div>"}<script>window.onload=()=>window.print()</script></body></html>`);
+      page.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Relatório · ${escapeHtml(report.balance.name)}</title><style>@page{size:A4 portrait;margin:8mm}*{box-sizing:border-box}body{font:8pt Arial,sans-serif;color:#17231f;margin:0}.report-header{border-bottom:1.5px solid #176b4d;padding-bottom:3mm;margin-bottom:4mm}.brand{display:flex;align-items:center;gap:8px;margin-bottom:3mm}.brand img{width:105px;height:auto;flex:0 0 auto}.brand small{margin-left:auto;color:#58685f;font-size:7pt}.title-row{display:flex;justify-content:space-between;align-items:start;gap:10px}.title-row h1{font-size:14pt;margin:0 0 2px}.meta-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 10px;margin-top:6px}.meta-grid div{display:grid;gap:2px;overflow-wrap:anywhere}.meta-grid b{font-size:6.5pt;text-transform:uppercase;color:#53645b;letter-spacing:.03em}.summary{margin-top:6px}.category{margin-top:4mm;break-inside:auto}.category h2{font-size:9pt;background:#eaf5ee;padding:4px 6px;margin:0}.category h2 small{font-size:7pt;font-weight:400;color:#53645b}table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:6.5pt}table.report-table th:nth-child(1){width:10%}table.report-table th:nth-child(2){width:21%}table.report-table th:nth-child(3){width:9%}table.report-table th:nth-child(4){width:24%}table.report-table th:nth-child(5){width:15%}table.report-table th:nth-child(6){width:9%}table.report-table th:nth-child(7){width:12%}thead{display:table-header-group}th{text-align:left;text-transform:uppercase;font-size:6pt;color:#46574d;background:#f4f6f4}td,th{border:1px solid #d8e0dc;padding:3px;vertical-align:top;overflow-wrap:anywhere}tr{break-inside:avoid}.code{font-family:monospace;white-space:normal;overflow-wrap:anywhere}table.grid-table{margin:2mm 0}table.grid-table th:first-child{width:30%}.count{margin:0 0 2px}.approved{color:#176b4d}.muted{color:#7a8680}.empty{text-align:center;padding:10px;color:#7a8680}@media print{.category h2{print-color-adjust:exact;-webkit-print-color-adjust:exact}}</style></head><body><header class="report-header"><div class="brand"><img src="${logoUrl}" alt="Atacadista Silva"><div class="title-row"><div><h1>Relatório do balanço</h1><strong>${escapeHtml(report.balance.name)}</strong></div><span><b>Status:</b> ${escapeHtml(report.balance.status)}</span></div><small>Gerado em ${escapeHtml(formatDate(report.generatedAt))}</small></div><div class="meta-grid"><div><b>Identificador</b><span>${escapeHtml(report.balance.id)}</span></div><div><b>Responsável pela criação</b><span>${escapeHtml(report.balance.createdBy.name)} (${escapeHtml(report.balance.createdBy.login)})</span></div><div><b>Vendedores destinados</b><span>${escapeHtml(report.balance.assignedSellers.map((seller) => seller.name).join(", ") || "—")}</span></div>${dates}<div><b>Total de itens</b><span>${report.balance.itemCount}</span></div>${report.balance.cancellationReason ? `<div><b>Motivo do cancelamento</b><span>${escapeHtml(report.balance.cancellationReason)}</span></div>` : ""}</div></header>${categorySections || "<div class=empty>Este balanço não possui itens.</div>"}<script>window.onload=()=>window.print()</script></body></html>`);
       page.document.close();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Falha ao gerar o relatório do balanço."); }
   }
@@ -688,8 +765,8 @@ function Balances({ token, user }: { token: string; user: User }) {
                         if (event.target.checked) next[product.id] = "0"; else delete next[product.id];
                         return next;
                       })} />
-                      <span>{product.name}<small>{product.internalCode} · {product.unit}{wholeCategory ? " · incluído pela categoria" : ""}</small></span>
-                      {(individual || wholeCategory) && <input className="quantity" value={selected[product.id] ?? "0"} onChange={(event) => setSelected((current) => ({ ...current, [product.id]: event.target.value }))} aria-label={`Saldo de ${product.name}`} />}
+                      <span>{product.name}<small>{product.internalCode} · {product.unit === "PAR" ? "PAR · numeração 34 a 40" : product.unit}{wholeCategory ? " · incluído pela categoria" : ""}</small></span>
+                      {(individual || wholeCategory) && product.unit !== "PAR" && <input className="quantity" value={selected[product.id] ?? "0"} onChange={(event) => setSelected((current) => ({ ...current, [product.id]: event.target.value }))} aria-label={`Saldo de ${product.name}`} />}
                     </label>;
                   })}</div>}
                 </section>;
@@ -707,7 +784,6 @@ function Balances({ token, user }: { token: string; user: User }) {
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
-
 
 
 

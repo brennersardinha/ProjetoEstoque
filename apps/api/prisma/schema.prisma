@@ -154,6 +154,8 @@ model BalanceItem {
   productId         String     @map("product_id") @db.Uuid
   product           Product    @relation(fields: [productId], references: [id])
   referenceQuantity Decimal    @map("reference_quantity") @db.Decimal(14, 3)
+  // Numeração da grade de solados (34 a 40); 0 para produtos sem grade.
+  size              Int        @default(0)
   selectedIndividually Boolean @default(true) @map("selected_individually")
   finalQuantity     Decimal?   @map("final_quantity") @db.Decimal(14, 3)
   status            ItemStatus @default(PENDENTE)
@@ -163,7 +165,7 @@ model BalanceItem {
   approvedAt        DateTime?  @map("approved_at")
   counts            Count[]
 
-  @@unique([balanceId, productId])
+  @@unique([balanceId, productId, size])
   @@map("balance_items")
 }
 

@@ -4,7 +4,7 @@ const config: ExpoConfig = {
   name: "Estoque",
   owner: "brennersardinha",
   slug: "estoque-inventario",
-  version: "0.3.4",
+  version: "0.3.5",
   orientation: "portrait",
   userInterfaceStyle: "light",
   icon: "./assets/icon.png",
@@ -16,7 +16,8 @@ const config: ExpoConfig = {
   scheme: "estoque",
   platforms: ["android", "ios"],
   extra: {
-    apiUrl: process.env.EXPO_PUBLIC_API_URL ?? "http://192.168.15.8:3000/api",
+    apiUrl: process.env.EXPO_PUBLIC_API_URL ?? null,
+    apiPort: Number(process.env.EXPO_PUBLIC_API_PORT ?? 3000),
     eas: {
       projectId: "7007b09a-fe02-4539-b3af-8129bfce3bfb"
     }
@@ -36,13 +37,15 @@ const config: ExpoConfig = {
     supportsTablet: false,
     infoPlist: {
       ITSAppUsesNonExemptEncryption: false,
-      NSCameraUsageDescription: "A câmera é usada para identificar produtos no inventário."
+      NSCameraUsageDescription: "A câmera é usada para identificar produtos no inventário.",
+      NSLocalNetworkUsageDescription: "O acesso à rede local é usado para encontrar o servidor do estoque da loja.",
+      NSAppTransportSecurity: { NSAllowsLocalNetworking: true }
     }
   },
   android: {
     package: "com.projetoestoque.inventario",
-    versionCode: 8,
-    permissions: ["CAMERA"]
+    versionCode: 9,
+    permissions: ["CAMERA", "ACCESS_NETWORK_STATE", "ACCESS_WIFI_STATE"]
   }
 };
 

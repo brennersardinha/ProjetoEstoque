@@ -67,6 +67,7 @@ Estados: `[x]` implementado e validado; `[~]` implementado, aguardando validaç�
 
 ### Artefatos desta versão
 
+- Versão 0.3.5 (28/10/2026): instalador Windows do painel e servidor `release/Estoque Setup 0.3.5.exe`; Expo Android preview 0.3.5 (versionCode 9) com descoberta automática do servidor na rede, sem IP fixo: https://expo.dev/accounts/brennersardinha/projects/estoque-inventario/builds/3fad7d95-5ec6-4c94-bbd5-c54b73f15ee9
 - Expo Android preview 0.3.2 com API em 192.168.15.8: https://expo.dev/accounts/brennersardinha/projects/estoque-inventario/builds/6c8d0869-2468-4c73-a029-713467765594 (build enviado; aguarda conclusão na fila EAS).
 - Instalador Windows do painel e servidor 0.3.3: `release/Estoque Setup 0.3.3.exe`.
 

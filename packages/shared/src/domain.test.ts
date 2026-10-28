@@ -5,6 +5,7 @@ describe("regras compartilhadas", () => {
   it("aceita unidades previstas para o MVP", () => {
     expect(unitSchema.parse("UN")).toBe("UN");
     expect(unitSchema.parse("ROLO")).toBe("ROLO");
+    expect(unitSchema.parse("PAR")).toBe("PAR");
   });
 
   it("recusa quantidade negativa ou com mais de tres casas", () => {
